@@ -85,6 +85,13 @@ function update(dt) {
   // Stay inside the room.
   player.x = Math.max(0, Math.min(room.w - player.size, player.x));
   player.y = Math.max(0, Math.min(room.h - player.size, player.y));
+
+  // Hands ease toward the skull, each at its own pace (frame-rate independent).
+  for (const h of hands) {
+    const k = 1 - Math.exp(-h.follow * dt);
+    h.x += (player.x - h.x) * k;
+    h.y += (player.y - h.y) * k;
+  }
 }
 
 function polygon(points, fill, stroke) {
@@ -118,7 +125,7 @@ function drawFloor() {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 13;
+const ASSET_VERSION = 14;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -143,10 +150,17 @@ const ART_W = 64; // reference width, so every sprite gets the same pixel size
 
 // Facing front, bony hands float a little out from the jaw on both sides. The
 // hand uses the skull's pixel size, colours and black outline, so they read as
-// one drawing.
+// one drawing. Each hand bobs and sways on its own rhythm and trails the skull
+// at its own pace, so the three parts drift apart and back together.
 const hand = loadImage("assets/hand.png");
 const HAND_OVERLAP = -2; // art px the hand tucks under the skull's side (negative: a gap)
 const HAND_DROP = 6;     // art px the hand reaches below the skull
+const HAND_SWAY = 1.5;   // art px of sideways drift
+const hands = [
+  // side: -1 left (as drawn), 1 right (mirrored); periods in ms; follow: how fast it catches up
+  { side: -1, bobPeriod: 520, bobPhase: 1.3, swayPeriod: 830, swayPhase: 0.4, follow: 7, x: player.x, y: player.y },
+  { side: 1, bobPeriod: 390, bobPhase: 4.1, swayPeriod: 670, swayPhase: 2.6, follow: 5, x: player.x, y: player.y },
+];
 
 function drawPlayer(time) {
   const cx = player.x + player.size / 2;
@@ -168,27 +182,36 @@ function drawPlayer(time) {
   if (zoom >= 1) zoom = Math.floor(zoom);
   const w = Math.round(skull.naturalWidth * zoom);
   const h = Math.round(skull.naturalHeight * zoom);
-  const lift = (TILE_H * 0.35 + bob * TILE_H * 0.2) * scale;
+  const baseLift = TILE_H * 0.35 * scale;
+  const bobRange = TILE_H * 0.2 * scale;
   ctx.imageSmoothingEnabled = false;
+  if (player.facing === "front") drawHands(time, zoom, baseLift, bobRange, w);
   ctx.save();
-  ctx.translate(Math.round(foot.x), Math.round(foot.y - lift));
+  ctx.translate(Math.round(foot.x), Math.round(foot.y - baseLift - bob * bobRange));
   const left = -Math.round(w / 2);
-  if (player.facing === "front" && hand.complete && hand.naturalWidth) {
-    const hw = Math.round(hand.naturalWidth * zoom);
-    const hh = Math.round(hand.naturalHeight * zoom);
-    const hx = left - Math.round((hand.naturalWidth - HAND_OVERLAP) * zoom);
-    const hy = Math.round(HAND_DROP * zoom) - hh;
-    ctx.drawImage(hand, hx, hy, hw, hh);
-    // The other hand is the same drawing mirrored around the skull's middle.
-    ctx.save();
-    ctx.translate(2 * left + w, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(hand, hx, hy, hw, hh);
-    ctx.restore();
-  }
   if (player.facing.endsWith("right")) ctx.scale(-1, 1);
   ctx.drawImage(skull, left, -h, w, h);
   ctx.restore();
+}
+
+// Drawn behind the skull. Each hand sits beside where the skull's front view
+// is (skullW wide), at its own trailing position, bob and sway.
+function drawHands(time, zoom, baseLift, bobRange, skullW) {
+  if (!hand.complete || !hand.naturalWidth) return;
+  const hw = Math.round(hand.naturalWidth * zoom);
+  const hh = Math.round(hand.naturalHeight * zoom);
+  const gap = Math.round(skullW / 2) + Math.round((hand.naturalWidth - HAND_OVERLAP) * zoom);
+  for (const h of hands) {
+    const at = toScreen(h.x + player.size / 2, h.y + player.size / 2);
+    const bob = (Math.sin(time / h.bobPeriod + h.bobPhase) + 1) / 2;
+    const sway = Math.sin(time / h.swayPeriod + h.swayPhase) * HAND_SWAY * zoom;
+    ctx.save();
+    ctx.translate(Math.round(at.x + sway), Math.round(at.y - baseLift - bob * bobRange));
+    // The left hand is drawn as is; the right is the same drawing mirrored.
+    ctx.scale(-h.side, 1);
+    ctx.drawImage(hand, -gap, Math.round(HAND_DROP * zoom) - hh, hw, hh);
+    ctx.restore();
+  }
 }
 
 function draw(time) {
