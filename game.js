@@ -161,13 +161,17 @@ function seed(i, j) {
 const SETTS_PER_TILE = 2.5;
 function sett(x, y) {
   const n = SETTS_PER_TILE;
-  const i = Math.floor(x * n), j = Math.floor(y * n);
-  const jx = (hash(i, j, 61) - 0.5) * 0.12, jy = (hash(i, j, 62) - 0.5) * 0.12;
-  const size = 0.9 + hash(i, j, 63) * 0.12;
-  const dx = Math.abs(2 * (x * n - i - 0.5 - jx)) / size;
-  const dy = Math.abs(2 * (y * n - j - 0.5 - jy)) / size;
-  const r = Math.sqrt(Math.sqrt(dx ** 4 + dy ** 4)); // rounded square: 0 in the middle, 1 at the edge
-  return { edge: (1 - r) * 0.6, near: { i, j, s: { x: (i + 0.5 + jx) / n, y: (j + 0.5 + jy) / n } } };
+  const j = Math.floor(y * n);
+  const off = hash(j, 0, 60); // each row is laid shifted by its own amount
+  const i = Math.floor(x * n + off);
+  const jx = (hash(i, j, 61) - 0.5) * 0.12, jy = (hash(i, j, 62) - 0.5) * 0.1;
+  const sx = 0.74 + hash(i, j, 63) * 0.18, sy = 0.76 + hash(i, j, 64) * 0.16; // its own width and depth
+  const p = 2.4 + hash(i, j, 65) * 2.6; // some stones rounder, some squarer
+  const dx = Math.abs(2 * (x * n + off - i - 0.5 - jx)) / sx;
+  const dy = Math.abs(2 * (y * n - j - 0.5 - jy)) / sy;
+  const knobbly = (noise(x * 9, y * 9, 66) - 0.5) * 0.16; // uneven outlines
+  const r = Math.pow(dx ** p + dy ** p, 1 / p) + knobbly; // 0 in the middle, 1 at the edge
+  return { edge: (1 - r) * 0.6, near: { i, j, s: { x: (i + 0.5 + jx - off) / n, y: (j + 0.5 + jy) / n } } };
 }
 
 // Palette index for a floor point: water, then moss, then bare stone.
@@ -201,6 +205,7 @@ function floorColour(x, y, px, py) {
   }
 
   if (mortar) return 0;
+  if (hash(c.near.i, c.near.j, 67) < 0.025) return hash(px, py, 68) < 0.3 ? P_STONE : 0; // a missing cobble
   // Stones near a puddle are damp and a shade darker.
   return P_STONE + Math.max(0, stoneShade(c, x, y, px, py) - (wet > -0.12 ? 1 : 0));
 }
@@ -222,8 +227,10 @@ function cobble(x, y) {
 
 // Shade index into STONE for a point on a stone.
 function stoneShade({ edge, near }, x, y, px, py) {
-  // Each stone gets its own tone; a few speckles break up flat areas.
-  let shade = 2 + Math.floor(hash(near.i, near.j, 3) * 3) - 1; // 1..3
+  // Each stone gets its own tone, a few much darker or lighter; a few
+  // speckles break up flat areas.
+  const tone = hash(near.i, near.j, 3);
+  let shade = tone < 0.12 ? 0 : tone > 0.93 ? 4 : 1 + Math.floor((tone - 0.12) / 0.81 * 3); // 0..4
   if (hash(px, py, 4) < 0.07) shade += hash(px, py, 5) < 0.5 ? -1 : 1;
 
   // Bevel: the stone's top-left rim catches light, its bottom-right rim is in shade.
@@ -242,7 +249,10 @@ const WALL_T = 0.4;   // wall thickness, tiles
 const SLICE = 1 / 6;  // walls and broken ground are built from columns this wide
 const COURSE = 1 / 6; // height of one course of bricks (8 art px)
 const DEPTH = 5;      // how far down the tower is painted before the dark takes it
-const ZMAX = 4.6;     // tallest a wall can get, tiles
+const ZMAX = 4.8;     // tallest a wall can get, tiles
+const CORNICE = 4 * COURSE; // solid band of blocks round the top of the tower
+const RECESS = 0.3;   // how deep the recesses between the tower's pillars go
+const PILLAR_W = 4 * SLICE, PILLAR_EVERY = 2; // pillar width and spacing down the tower's sides
 
 // Ruined wall heights (tiles) along each back wall, from the back corner out.
 const LEFT_WALL = [[0, 3.0], [0.8, 3.3], [1.6, 2.6], [2.1, 3.4], [3.5, 3.0], [4.4, 3.8], [5.0, 4.0],
@@ -283,15 +293,24 @@ function groundTop(x, y) {
   const bite = biteDepth(y);
   const e = room.w - x; // distance in from the edge
   if (x < BAND.x0 || y < BAND.y0 || y >= BAND.y1 || e >= bite) return 0;
-  // It falls away in a few broad layers (1, 3 and 6 courses down), with
-  // ragged but continuous edges between them.
+  // It falls away in a few broad layers (1, 2 and 4 courses down, the last
+  // onto the tower's core), with ragged but continuous edges between them.
   const close = 1 - e / bite + (noise(x * 2.5, y * 2.5, 24) - 0.5) * 0.3; // 0 at the rim, 1 at the edge
-  return -(close < 0.35 ? 1 : close < 0.7 ? 3 : 6) * SLICE;
+  return -(close < 0.35 ? 1 : close < 0.7 ? 2 : 4) * SLICE;
 }
 
 function wallHeight(points, u, k, side) {
   const jag = (noise(u * 1.7, side * 3, 21) - 0.5) * 0.5 + (hash(k, side, 22) - 0.5) * 0.35;
   return Math.max(0.35, Math.round((profile(points, u) + jag) / COURSE) * COURSE);
+}
+
+// Some wall columns carry a loose block on top, set a little in or out, so
+// the broken tops are chunky. Returns how far its inner edge is set in and
+// where its outer edge ends, across the wall's thickness, or nothing.
+function capBlock(k, side) {
+  if (hash(k, side, 26) > 0.35) return null;
+  const shift = (hash(k, side, 27) - 0.5) * 0.14;
+  return { inset: 0.04 + shift, out: -0.04 + shift };
 }
 
 function buildBoxes() {
@@ -300,7 +319,10 @@ function buildBoxes() {
   // Back-left wall: x in [-T, 0], sliced along y (it also covers the back corner).
   for (let k = 0, y0 = -T; y0 < H; k++, y0 += SLICE) {
     const y1 = Math.min(H, y0 + SLICE);
-    boxes.push({ kind: "wall", x0: -T, x1: 0, y0, y1, z0: 0, z1: wallHeight(LEFT_WALL, Math.max(0, (y0 + y1) / 2), k, 1) });
+    const z1 = wallHeight(LEFT_WALL, Math.max(0, (y0 + y1) / 2), k, 1);
+    boxes.push({ kind: "wall", x0: -T, x1: 0, y0, y1, z0: 0, z1 });
+    const cap = capBlock(k, 1);
+    if (cap) boxes.push({ kind: "wall", x0: -T + cap.inset, x1: cap.out, y0, y1, z0: z1, z1: z1 + COURSE });
   }
   // Back-right wall: y in [-T, 0], sliced along x, with the archway cut through it.
   for (let k = 0, x0 = 0; x0 < W; k++, x0 += SLICE) {
@@ -312,18 +334,33 @@ function buildBoxes() {
       z1 = Math.max(z1, Math.round((z0 + 0.6) / COURSE) * COURSE); // keep a solid course over the arch
     }
     boxes.push({ kind: "wall", x0, x1, y0: -T, y1: 0, z0, z1, arch: z0 > 0 });
+    const cap = capBlock(k, 2);
+    if (cap) boxes.push({ kind: "wall", x0, x1, y0: -T + cap.inset, y1: cap.out, z0: z1, z1: z1 + COURSE });
   }
-  // The tower: solid around the broken stretch, columns inside it.
-  const bx0 = BAND.x0, by0 = BAND.y0, by1 = BAND.y1;
-  boxes.push({ kind: "tower", x0: -T, x1: W, y0: -T, y1: by0, z0: -DEPTH, z1: 0 });
-  boxes.push({ kind: "tower", x0: -T, x1: bx0, y0: by0, y1: by1, z0: -DEPTH, z1: 0 });
-  boxes.push({ kind: "tower", x0: -T, x1: W, y0: by1, y1: H, z0: -DEPTH, z1: 0 });
+  // The top of the tower: a solid band of blocks, built in columns around the
+  // broken stretch so it can fall away there.
+  const bx0 = BAND.x0, by0 = BAND.y0, by1 = BAND.y1, C = -CORNICE;
+  boxes.push({ kind: "tower", x0: -T, x1: W, y0: -T, y1: by0, z0: C, z1: 0 });
+  boxes.push({ kind: "tower", x0: -T, x1: bx0, y0: by0, y1: by1, z0: C, z1: 0 });
+  boxes.push({ kind: "tower", x0: -T, x1: W, y0: by1, y1: H, z0: C, z1: 0 });
   for (let y0 = by0; y0 < by1 - 1e-9; y0 += SLICE) {
     for (let x0 = bx0; x0 < W - 1e-9; x0 += SLICE) {
       const top = groundTop(x0 + SLICE / 2, y0 + SLICE / 2);
-      boxes.push({ kind: "tower", x0, x1: x0 + SLICE, y0, y1: y0 + SLICE, z0: -DEPTH, z1: top });
+      if (top > C + 1e-9) boxes.push({ kind: "tower", x0, x1: x0 + SLICE, y0, y1: y0 + SLICE, z0: C, z1: top });
     }
   }
+  // Below it: a core set back from both front sides, with pillars standing
+  // out in front of it all the way down, so the sides are deep recesses
+  // between pillars. A pillar always stands on the front corner.
+  boxes.push({ kind: "core", x0: -T, x1: W - RECESS, y0: -T, y1: H - RECESS, z0: -DEPTH, z1: C });
+  for (let u = 1.2 - T; u < W - 0.5; u += PILLAR_EVERY) {
+    boxes.push({ kind: "pillar", x0: u, x1: u + PILLAR_W, y0: H - RECESS, y1: H, z0: -DEPTH, z1: C });
+  }
+  for (let u = 1.2 - T; u < H - 0.5; u += PILLAR_EVERY) {
+    boxes.push({ kind: "pillar", x0: W - RECESS, x1: W, y0: u, y1: u + PILLAR_W, z0: -DEPTH, z1: C });
+  }
+  boxes.push({ kind: "pillar", x0: W - PILLAR_W, x1: W, y0: H - RECESS, y1: H, z0: -DEPTH, z1: C });
+  boxes.push({ kind: "pillar", x0: W - RECESS, x1: W, y0: H - PILLAR_W, y1: H, z0: -DEPTH, z1: C });
   // Loose stones: fallen into the break and lying near its rim.
   for (let i = 0; i < 16; i++) {
     const y = BREAK.y + (hash(i, 1, 25) * 2 - 1) * BREAK.half * 0.9;
@@ -339,15 +376,15 @@ function buildBoxes() {
 
 // Bricks on a vertical face. u runs along the face, v up it (tiles); base is
 // the face's light (lit faces higher); rough makes broken masonry.
-function brick(u, v, base, rough, px, py, side) {
+function brick(u, v, base, rough, px, py, side, square = false) {
   const course = Math.floor(v / COURSE);
   const fv = v / COURSE - course; // 0 at a course's bottom, 1 at its top
-  const len = 0.28 + hash(course, side, 31) * 0.12;
+  const len = square ? 0.17 + hash(course, side, 31) * 0.07 : 0.28 + hash(course, side, 31) * 0.12;
   const w = (u + hash(course, side, 32) * len) / len;
   const bi = Math.floor(w), fu = w - bi;
   const id = hash(bi, course * 7 + side, 33);
   const m = noise(u * 1.3, v * 1.3 + side * 10, 37); // moss patches
-  if (fv < 0.125 || fu * len < 0.021) return m > 0.64 && v < 2 ? P_MOSS : 0; // mortar
+  if (fv < 0.125 || fu * len < 0.021) return m > 0.64 && v > 0 && v < 2 ? P_MOSS : 0; // mortar, mossy low on the walls
   if (id < 0.035 + rough * 0.1) return fv > 0.8 ? P_STONE : 0; // missing brick: a dark hole
   if (id > 0.6 && ((fu < 0.14 && fv > 0.75) || (fu > 0.88 && fv < 0.35))) return 0; // chipped corner
   if (id > 0.86 - rough * 0.2) { // a crack across the brick
@@ -356,7 +393,10 @@ function brick(u, v, base, rough, px, py, side) {
   }
   let shade = base + Math.floor(hash(bi, course * 7 + side, 34) * 3) - 1;
   if (hash(px, py, 35) < 0.08) shade += hash(px, py, 36) < 0.5 ? -1 : 1;
-  if (fv > 0.8) shade += 1; // each brick's top lip catches the light
+  // Each block is bevelled: lit along its top and left edges, shaded along
+  // its bottom and right, so the masonry reads as stacked blocks.
+  if (fv > 0.8 || fu * len < 0.042) shade += 1;
+  else if (fv < 0.25 || (1 - fu) * len < 0.021) shade -= 1;
   if (fv > 0.8 && m > 0.7) return P_MOSS + 1;
   return P_STONE + Math.max(0, Math.min(STONE.length - 1, shade));
 }
@@ -382,13 +422,20 @@ function shadeHit(box, face, x, y, z, px, py) {
   // Vertical faces. "east" faces +x, "south" faces +y; south faces the light.
   const u = face === "east" ? y : x;
   if (box.kind === "wall") return brick(u, z, face === "south" ? 2 : 1, 0, px, py, face === "east" ? 1 : 2);
-  const outside = (face === "east" && x >= W - 1e-6) || (face === "south" && y >= H - 1e-6);
-  let colour = brick(u, z, outside ? (face === "south" ? 2 : 1) : 0, outside ? 0.15 : 0.6, px, py, face === "east" ? 3 : 4);
-  if (outside && z < 0) { // the tower's sides darken and fall away into the dark
-    const d = -z;
-    if (colour >= P_STONE && colour < P_MOSS) colour = Math.max(P_STONE, colour - Math.floor(d / 1.1));
-    if ((d - 0.4) / (DEPTH * 0.8 - 0.4) > bayer(px, py)) return -1;
+  const lit = face === "south" ? 2 : 1;
+  const side = face === "east" ? 3 : 4;
+  let colour;
+  if (box.kind === "pillar") colour = brick(u, z, lit, 0.15, px, py, side, true);
+  else if (box.kind === "core") { // back in a recess: deep shadow, darkest just under the band above
+    colour = brick(u, z, 0, 0.15, px, py, side, true);
+    if (colour > P_STONE && colour < P_MOSS) colour -= z > -CORNICE - 0.4 ? 2 : 1;
   }
+  else if ((face === "east" && x >= W - 1e-6) || (face === "south" && y >= H - 1e-6)) colour = brick(u, z, lit, 0.15, px, py, side, true);
+  else return brick(u, z, 0, 0.6, px, py, side); // broken-open masonry inside the tower
+  // The tower's sides darken and fall away into the dark.
+  const d = -z;
+  if (colour >= P_STONE && colour < P_MOSS) colour = Math.max(P_STONE, colour - Math.floor(Math.max(0, d - 0.7) / 1.4));
+  if ((d - 1.2) / (DEPTH * 0.85 - 1.2) > bayer(px, py)) return -1;
   return colour;
 }
 
@@ -651,7 +698,7 @@ function flicker(time, i) {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 18;
+const ASSET_VERSION = 19;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
