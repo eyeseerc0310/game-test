@@ -1,7 +1,8 @@
 # Cut a sprite out of an image and shrink it to its real pixel size.
 # The background is either real transparency or a fake grey/white checkerboard.
 # Usage: python3 tools/cut_sprite.py <source.png> <out.png> <preview.png> [height]
-# Give a height (in art pixels) to match another view of the same character.
+# Give a height (in art pixels) to match another view of the same character;
+# views that are mostly cranium need a smaller height to cover the same area.
 import sys
 from PIL import Image
 import numpy as np
