@@ -24,14 +24,17 @@ function resize() {
 
   // Fit the whole room on screen with some margin. Whole-number zoom when it
   // fits, so every art pixel is the same size; never bigger than 3x.
-  const roomPxW = (room.w + room.h) * TILE_W / 2;
-  const roomPxH = (room.w + room.h) * TILE_H / 2 + TILE_H * 2;
-  scale = Math.min(3, (canvas.width * 0.9) / roomPxW, (canvas.height * 0.85) / roomPxH);
+  // The fitted area runs from the tops of the walls down to a little of the
+  // tower below the floor's front corner.
+  const above = 3.6 * TILE_H, below = 1.2 * TILE_H;
+  const roomPxW = (room.w + room.h + 0.8) * TILE_W / 2;
+  const roomPxH = above + (room.w + room.h) * TILE_H / 2 + below;
+  scale = Math.min(3, (canvas.width * 0.94) / roomPxW, (canvas.height * 0.94) / roomPxH);
   if (scale >= 1) scale = Math.floor(scale);
 
-  // Put the middle of the room in the middle of the screen, on a whole pixel.
+  // Centre that area on the screen, on a whole pixel.
   originX = Math.round(canvas.width / 2 - ((room.w - room.h) * TILE_W / 4) * scale);
-  originY = Math.round(canvas.height / 2 - ((room.w + room.h) * TILE_H / 4) * scale);
+  originY = Math.round((canvas.height - roomPxH * scale) / 2 + above * scale);
 }
 window.addEventListener("resize", resize);
 resize();
@@ -99,15 +102,20 @@ function update(dt) {
   }
 }
 
-// ---------- Cobblestone floor ----------
-// Painted once, pixel by pixel, at art resolution. Stones are a jittered
-// Voronoi pattern laid out on the floor itself (so they're squashed by the
-// isometric view), joined by black mortar, lit from the top-left, and limited
-// to a small stone palette that shares the skull's outline black. Sparse moss
-// grows in the joints, and a few puddles sit in the low spots with water
-// running out along the joints around them.
+// ---------- Tower summit ----------
+// The floor is the top of a ruined tower. The whole still scene (cobbled
+// floor, crumbling walls with an archway, the broken corner and the tower's
+// sides falling away into the dark) is painted once, pixel by pixel, at art
+// resolution: each pixel looks into a set of stone boxes and paints whatever
+// surface it meets first. Torch flames and their light are drawn on top every
+// frame.
+//
+// Cobbles are a jittered Voronoi pattern laid out on the floor itself (so the
+// isometric view squashes them), joined by black mortar, lit from the top-left
+// and limited to a small stone palette that shares the skull's outline black.
+// Sparse moss grows in the joints, and a few puddles sit in the low spots with
+// water running out along the joints around them.
 const STONES_PER_TILE = 3;
-const SLAB = 10; // art px of stone edge visible below the floor's front sides
 const MORTAR = "#1a1915"; // the skull's outline black
 const STONE = ["#2b2a2c", "#38363a", "#46434a", "#55515a", "#66616a", "#7a7480"]; // dark -> light
 const MOSS = ["#27301d", "#36422a", "#4b5a35"]; // dark -> light
@@ -145,46 +153,6 @@ function seed(i, j) {
     x: (i + 0.2 + hash(i, j, 1) * 0.6) / STONES_PER_TILE,
     y: (j + 0.2 + hash(i, j, 2) * 0.6) / STONES_PER_TILE,
   };
-}
-
-const floorArt = paintFloor();
-
-function paintFloor() {
-  const ox = room.h * TILE_W / 2; // art x of the floor's top corner
-  const W = (room.w + room.h) * TILE_W / 2;
-  const H = (room.w + room.h) * TILE_H / 2 + SLAB;
-  const art = document.createElement("canvas");
-  art.width = W;
-  art.height = H;
-  const g = art.getContext("2d");
-  const rgb = [MORTAR, ...STONE, ...MOSS, ...WATER].map((c) => [1, 3, 5].map((k) => parseInt(c.slice(k, k + 2), 16)));
-  const img = g.createImageData(W, H);
-  const put = (px, py, colour) => {
-    const o = (py * W + px) * 4;
-    [img.data[o], img.data[o + 1], img.data[o + 2], img.data[o + 3]] = [...rgb[colour], 255];
-  };
-
-  for (let py = 0; py < H; py++) {
-    for (let px = 0; px < W; px++) {
-      // Art pixel centre -> floor position in tiles.
-      const a = (px + 0.5 - ox) / (TILE_W / 2);
-      const b = (py + 0.5) / (TILE_H / 2);
-      const x = (a + b) / 2;
-      const y = (b - a) / 2;
-      if (x >= 0 && x < room.w && y >= 0 && y < room.h) {
-        put(px, py, floorColour(x, y, px, py));
-        continue;
-      }
-      // Below the two front edges: the slab's cut stone sides.
-      const xe = a + room.h, ye = room.w - a; // where straight up meets each edge
-      const downL = py + 0.5 - (xe + room.h) * TILE_H / 2;
-      const downR = py + 0.5 - (room.w + ye) * TILE_H / 2;
-      if (xe >= 0 && xe <= room.w && downL > 0 && downL <= SLAB) put(px, py, P_STONE + sideShade(xe, downL, 2));
-      else if (ye >= 0 && ye <= room.h && downR > 0 && downR <= SLAB) put(px, py, P_STONE + sideShade(ye, downR, 1));
-    }
-  }
-  g.putImageData(img, 0, 0);
-  return { canvas: art, ox };
 }
 
 // Palette index for a floor point: water, then moss, then bare stone.
@@ -254,27 +222,389 @@ function stoneShade({ edge, near }, x, y, px, py) {
   return Math.max(0, Math.min(STONE.length - 1, shade));
 }
 
-// Cut-stone side of the slab: two courses of blocks; `lit` is 2 on the
-// left face (towards the light) and 1 on the right.
-function sideShade(along, down, lit) {
-  const course = down <= SLAB / 2 ? 0 : 1;
-  if (Math.abs(down - SLAB / 2) < 0.5 || down > SLAB - 1) return -1; // mortar between courses, dark bottom
-  const u = along * 54 + course * 9; // art px along the edge, courses offset
-  if (u % 18 < 1) return -1; // vertical joints
-  return Math.max(0, lit - (course ? 1 : 0) - (hash(Math.floor(u / 18), course, 6) < 0.3 ? 1 : 0));
+// ---------- Ruins and tower ----------
+const WALL_T = 0.4;   // wall thickness, tiles
+const SLICE = 1 / 6;  // walls and broken ground are built from columns this wide
+const COURSE = 1 / 6; // height of one course of bricks (8 art px)
+const DEPTH = 5;      // how far down the tower is painted before the dark takes it
+const ZMAX = 4.6;     // tallest a wall can get, tiles
+
+// Ruined wall heights (tiles) along each back wall, from the back corner out.
+const LEFT_WALL = [[0, 3.0], [0.8, 3.3], [1.6, 2.6], [2.1, 3.4], [3.5, 3.0], [4.4, 3.8], [5.0, 4.0],
+  [5.5, 2.1], [6.8, 1.5], [7.3, 2.3], [7.7, 3.7], [8.6, 3.9], [9.4, 2.8], [10, 1.1]];
+const RIGHT_WALL = [[0, 3.0], [1.0, 3.4], [2.8, 3.2], [3.0, 1.4], [3.9, 1.7], [4.3, 3.0], [7.0, 3.0],
+  [7.3, 2.5], [8.6, 2.4], [9.3, 1.5], [10, 0.5]];
+const ARCH = { c: 5.65, r: 1.05, spring: 1.45, rise: 0.95 }; // archway in the right wall
+// Broken stretch of the front-right edge: middle (along y), half its length, deepest bite.
+const BREAK = { y: 5.6, half: 2.0, bite: 1.7 };
+const BAND = { x0: room.w - 2, y0: 3.5, y1: 7.7 }; // area the break is built in
+// Torches: which wall, how far along it, how high.
+const TORCHES = [
+  { wall: "left", u: 4.2, z: 1.55 },
+  { wall: "right", u: 2.2, z: 1.65 },
+  { wall: "right", u: 8.2, z: 1.5 },
+];
+const TORCH_REACH = 3.4; // tiles the light reaches
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
+const bayer = (px, py) => BAYER[(py & 3) * 4 + (px & 3)];
+
+function profile(points, u) {
+  for (let i = 1; i < points.length; i++) {
+    const [u0, z0] = points[i - 1], [u1, z1] = points[i];
+    if (u <= u1) return z0 + (z1 - z0) * Math.max(0, (u - u0) / (u1 - u0));
+  }
+  return points[points.length - 1][1];
 }
 
-function drawFloor() {
+// How far the break eats into the floor from the edge at y (tiles, 0 = intact).
+function biteDepth(y) {
+  const t = (y - BREAK.y) / BREAK.half;
+  if (Math.abs(t) >= 1) return 0;
+  return Math.max(0, BREAK.bite * Math.pow(1 - t * t, 0.7) + (noise(y * 2.2, 0.5, 23) - 0.5) * 0.5);
+}
+
+// Height of the ground at a point: 0 on the floor, lower in the broken corner.
+function groundTop(x, y) {
+  const bite = biteDepth(y);
+  const e = room.w - x; // distance in from the edge
+  if (x < BAND.x0 || y < BAND.y0 || y >= BAND.y1 || e >= bite) return 0;
+  // It falls away in a few broad layers (1, 3 and 6 courses down), with
+  // ragged but continuous edges between them.
+  const close = 1 - e / bite + (noise(x * 2.5, y * 2.5, 24) - 0.5) * 0.3; // 0 at the rim, 1 at the edge
+  return -(close < 0.35 ? 1 : close < 0.7 ? 3 : 6) * SLICE;
+}
+
+function wallHeight(points, u, k, side) {
+  const jag = (noise(u * 1.7, side * 3, 21) - 0.5) * 0.5 + (hash(k, side, 22) - 0.5) * 0.35;
+  return Math.max(0.35, Math.round((profile(points, u) + jag) / COURSE) * COURSE);
+}
+
+function buildBoxes() {
+  const boxes = [];
+  const T = WALL_T, W = room.w, H = room.h;
+  // Back-left wall: x in [-T, 0], sliced along y (it also covers the back corner).
+  for (let k = 0, y0 = -T; y0 < H; k++, y0 += SLICE) {
+    const y1 = Math.min(H, y0 + SLICE);
+    boxes.push({ kind: "wall", x0: -T, x1: 0, y0, y1, z0: 0, z1: wallHeight(LEFT_WALL, Math.max(0, (y0 + y1) / 2), k, 1) });
+  }
+  // Back-right wall: y in [-T, 0], sliced along x, with the archway cut through it.
+  for (let k = 0, x0 = 0; x0 < W; k++, x0 += SLICE) {
+    const x1 = Math.min(W, x0 + SLICE), u = (x0 + x1) / 2;
+    let z1 = wallHeight(RIGHT_WALL, u, k, 2), z0 = 0;
+    const t = (u - ARCH.c) / ARCH.r;
+    if (Math.abs(t) < 1) {
+      z0 = ARCH.spring + ARCH.rise * Math.sqrt(1 - t * t);
+      z1 = Math.max(z1, Math.round((z0 + 0.6) / COURSE) * COURSE); // keep a solid course over the arch
+    }
+    boxes.push({ kind: "wall", x0, x1, y0: -T, y1: 0, z0, z1, arch: z0 > 0 });
+  }
+  // The tower: solid around the broken stretch, columns inside it.
+  const bx0 = BAND.x0, by0 = BAND.y0, by1 = BAND.y1;
+  boxes.push({ kind: "tower", x0: -T, x1: W, y0: -T, y1: by0, z0: -DEPTH, z1: 0 });
+  boxes.push({ kind: "tower", x0: -T, x1: bx0, y0: by0, y1: by1, z0: -DEPTH, z1: 0 });
+  boxes.push({ kind: "tower", x0: -T, x1: W, y0: by1, y1: H, z0: -DEPTH, z1: 0 });
+  for (let y0 = by0; y0 < by1 - 1e-9; y0 += SLICE) {
+    for (let x0 = bx0; x0 < W - 1e-9; x0 += SLICE) {
+      const top = groundTop(x0 + SLICE / 2, y0 + SLICE / 2);
+      boxes.push({ kind: "tower", x0, x1: x0 + SLICE, y0, y1: y0 + SLICE, z0: -DEPTH, z1: top });
+    }
+  }
+  // Loose stones: fallen into the break and lying near its rim.
+  for (let i = 0; i < 16; i++) {
+    const y = BREAK.y + (hash(i, 1, 25) * 2 - 1) * BREAK.half * 0.9;
+    const bite = biteDepth(y);
+    if (bite < 0.2) continue;
+    const x = room.w - bite * (0.2 + hash(i, 2, 25) * 1.1);
+    const size = 0.07 + hash(i, 3, 25) * 0.13;
+    const z0 = groundTop(x, y);
+    boxes.push({ kind: "rubble", x0: x - size / 2, x1: x + size / 2, y0: y - size / 2, y1: y + size / 2, z0, z1: z0 + size * 0.8, id: i });
+  }
+  return boxes;
+}
+
+// Bricks on a vertical face. u runs along the face, v up it (tiles); base is
+// the face's light (lit faces higher); rough makes broken masonry.
+function brick(u, v, base, rough, px, py, side) {
+  const course = Math.floor(v / COURSE);
+  const fv = v / COURSE - course; // 0 at a course's bottom, 1 at its top
+  const len = 0.28 + hash(course, side, 31) * 0.12;
+  const w = (u + hash(course, side, 32) * len) / len;
+  const bi = Math.floor(w), fu = w - bi;
+  const id = hash(bi, course * 7 + side, 33);
+  const m = noise(u * 1.3, v * 1.3 + side * 10, 37); // moss patches
+  if (fv < 0.125 || fu * len < 0.021) return m > 0.64 && v < 2 ? P_MOSS : 0; // mortar
+  if (id < 0.035 + rough * 0.1) return fv > 0.8 ? P_STONE : 0; // missing brick: a dark hole
+  if (id > 0.6 && ((fu < 0.14 && fv > 0.75) || (fu > 0.88 && fv < 0.35))) return 0; // chipped corner
+  if (id > 0.86 - rough * 0.2) { // a crack across the brick
+    const k = ((id * 97) % 1) * 2 - 1;
+    if (Math.abs(fu - 0.5 - k * (fv - 0.5) * 0.7) < 0.04) return 0;
+  }
+  let shade = base + Math.floor(hash(bi, course * 7 + side, 34) * 3) - 1;
+  if (hash(px, py, 35) < 0.08) shade += hash(px, py, 36) < 0.5 ? -1 : 1;
+  if (fv > 0.8) shade += 1; // each brick's top lip catches the light
+  if (fv > 0.8 && m > 0.7) return P_MOSS + 1;
+  return P_STONE + Math.max(0, Math.min(STONE.length - 1, shade));
+}
+
+// Palette index (or -1 for nothing) for the surface a pixel sees.
+function shadeHit(box, face, x, y, z, px, py) {
+  const W = room.w, H = room.h;
+  if (box.kind === "rubble") return P_STONE + 1 + Math.floor(hash(box.id, face.length, 40) * 2) + (face === "top" ? 1 : 0);
+  if (face === "top") {
+    if (box.kind === "wall") { // weathered wall tops, mossy in places
+      if (noise(x * 2, y * 2, 41) > 0.68 && hash(px, py, 42) < 0.6) return P_MOSS + 1 + (hash(px, py, 43) < 0.3 ? 1 : 0);
+      return P_STONE + 2 + (hash(px, py, 44) < 0.25 ? 1 : 0) - (hash(px, py, 45) < 0.15 ? 1 : 0);
+    }
+    if (z < -1e-6) { // floor of the break: rubble and dust, darker the deeper it goes
+      const c = cobble(x * 2.2, y * 2.2);
+      if (c.edge < 0.05) return 0;
+      const shade = 1 + Math.floor(hash(c.near.i, c.near.j, 46) * 2) - Math.floor(-z / 0.3);
+      return P_STONE + Math.max(0, shade);
+    }
+    if (x < 0 || y < 0) return P_STONE + 2; // ground under the archway
+    return floorPixel(x, y, px, py);
+  }
+  // Vertical faces. "east" faces +x, "south" faces +y; south faces the light.
+  const u = face === "east" ? y : x;
+  if (box.kind === "wall") return brick(u, z, face === "south" ? 2 : 1, 0, px, py, face === "east" ? 1 : 2);
+  const outside = (face === "east" && x >= W - 1e-6) || (face === "south" && y >= H - 1e-6);
+  let colour = brick(u, z, outside ? (face === "south" ? 2 : 1) : 0, outside ? 0.15 : 0.6, px, py, face === "east" ? 3 : 4);
+  if (outside && z < 0) { // the tower's sides darken and fall away into the dark
+    const d = -z;
+    if (colour >= P_STONE && colour < P_MOSS) colour = Math.max(P_STONE, colour - Math.floor(d / 1.1));
+    if ((d - 0.4) / (DEPTH * 0.8 - 0.4) > bayer(px, py)) return -1;
+  }
+  return colour;
+}
+
+// The floor, plus a little shade where it meets the walls and missing cobbles
+// around the break.
+function floorPixel(x, y, px, py) {
+  const gap = (room.w - x) - biteDepth(y);
+  if (gap >= 0 && gap < 0.4 && y > BAND.y0 && y < BAND.y1) {
+    const c = cobble(x, y);
+    if (hash(c.near.i, c.near.j, 47) < 0.6 * (1 - gap / 0.4)) return hash(px, py, 48) < 0.2 ? P_STONE : 0;
+  }
+  const colour = floorColour(x, y, px, py);
+  const wallGap = Math.min(x, y);
+  if (wallGap < 0.28 && colour >= P_STONE && colour < P_MOSS) return Math.max(P_STONE, colour - (wallGap < 0.12 ? 2 : 1));
+  return colour;
+}
+
+const NORMALS = { top: [0, 0, 1], east: [1, 0, 0], south: [0, 1, 0] };
+
+function torchWorld(t) {
+  // Where the torch meets the wall, and where its flame (the light) is.
+  const wall = t.wall === "left" ? [0, t.u, t.z] : [t.u, 0, t.z];
+  const out = t.wall === "left" ? [0.22, 0, 0.42] : [0, 0.22, 0.42];
+  return { wall, flame: wall.map((v, i) => v + out[i]) };
+}
+
+function paintScene() {
+  const T = WALL_T, W = room.w, H = room.h;
+  const OX = Math.ceil((H + T) * TILE_W / 2) + 2;
+  const OY = Math.ceil((ZMAX + T) * TILE_H) + 2;
+  const CW = Math.ceil((W + H + 2 * T) * TILE_W / 2) + 4;
+  const CH = OY + Math.ceil((W + H) * TILE_H / 2 + DEPTH * TILE_H) + 4;
+  const boxes = buildBoxes();
+
+  // Which boxes can show in each column of pixels.
+  const columns = Array.from({ length: CW }, () => []);
+  for (const b of boxes) {
+    const from = Math.max(0, Math.floor(OX + (b.x0 - b.y1) * TILE_W / 2) - 1);
+    const to = Math.min(CW - 1, Math.ceil(OX + (b.x1 - b.y0) * TILE_W / 2) + 1);
+    for (let px = from; px <= to; px++) columns[px].push(b);
+  }
+
+  const rgb = [MORTAR, ...STONE, ...MOSS, ...WATER].map((c) => [1, 3, 5].map((k) => parseInt(c.slice(k, k + 2), 16)));
+  const art = document.createElement("canvas");
+  art.width = CW;
+  art.height = CH;
+  const g = art.getContext("2d");
+  const img = g.createImageData(CW, CH);
+  const torches = TORCHES.map((t) => ({ ...t, ...torchWorld(t), light: new Float32Array(CW * CH), box: [CW, CH, 0, 0] }));
+
+  for (let px = 0; px < CW; px++) {
+    const a = (px + 0.5 - OX) / (TILE_W / 2); // x - y along this column
+    for (let py = 0; py < CH; py++) {
+      const b = (py + 0.5 - OY) / (TILE_H / 2); // x + y - 2z along this pixel's line of sight
+      // Walk along the line of sight with s = x + y (bigger is nearer) and keep
+      // the nearest box surface it passes through.
+      let best = null, bestS = -Infinity, bestFace = "";
+      for (const bx of columns[px]) {
+        const hx = 2 * bx.x1 - a, hy = 2 * bx.y1 + a, hz = 2 * bx.z1 + b;
+        const lo = Math.max(2 * bx.x0 - a, 2 * bx.y0 + a, 2 * bx.z0 + b);
+        const hi = Math.min(hx, hy, hz);
+        if (lo <= hi && hi > bestS) {
+          bestS = hi;
+          best = bx;
+          bestFace = hi === hz ? "top" : hi === hx ? "east" : "south";
+        }
+      }
+      if (!best) continue;
+      const x = (bestS + a) / 2, y = (bestS - a) / 2, z = (bestS - b) / 2;
+      const colour = shadeHit(best, bestFace, x, y, z, px, py);
+      if (colour < 0) continue;
+      const o = (py * CW + px) * 4;
+      [img.data[o], img.data[o + 1], img.data[o + 2], img.data[o + 3]] = [...rgb[colour], 255];
+
+      // How much each torch lights this spot: falls off with distance, and
+      // only surfaces facing the flame are lit.
+      const n = NORMALS[bestFace];
+      for (const t of torches) {
+        const lx = t.flame[0] - x, ly = t.flame[1] - y, lz = t.flame[2] - z;
+        const d = Math.hypot(lx, ly, lz);
+        if (d >= TORCH_REACH) continue;
+        const facing = (n[0] * lx + n[1] * ly + n[2] * lz) / d;
+        if (facing <= 0) continue;
+        const level = Math.pow(1 - d / TORCH_REACH, 1.6) * (0.35 + 0.65 * facing);
+        // A few hard-edged bands, dithered between, so the light stays pixel art.
+        const band = Math.floor(level * 5 + bayer(px, py)) / 5;
+        if (band <= 0) continue;
+        t.light[py * CW + px] = band;
+        t.box = [Math.min(t.box[0], px), Math.min(t.box[1], py), Math.max(t.box[2], px), Math.max(t.box[3], py)];
+      }
+    }
+  }
+  g.putImageData(img, 0, 0);
+
+  // Each torch's light becomes its own warm layer, cropped to where it reaches.
+  const lights = torches.map((t) => {
+    const [x0, y0, x1, y1] = t.box;
+    const lw = x1 - x0 + 1, lh = y1 - y0 + 1;
+    const c = document.createElement("canvas");
+    c.width = lw;
+    c.height = lh;
+    const lg = c.getContext("2d");
+    const li = lg.createImageData(lw, lh);
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        const v = t.light[(y + y0) * CW + x + x0];
+        if (!v) continue;
+        const o = (y * lw + x) * 4;
+        [li.data[o], li.data[o + 1], li.data[o + 2], li.data[o + 3]] = [255, 150, 70, Math.round(v * 0.5 * 255)];
+      }
+    }
+    lg.putImageData(li, 0, 0);
+    return { canvas: c, x0, y0, torch: t };
+  });
+  return { canvas: art, OX, OY, lights };
+}
+
+// ---------- Torches ----------
+// A wall bracket and torch, drawn for a torch on the left wall (sticking out to
+// the right); torches on the right wall use it mirrored. The plate's middle
+// (column 0, row 8) sits on the wall; the flame stands in the cup (column 8).
+const BRACKET = [
+  ".....cccccc.",
+  ".....ckkkkc.",
+  "......cWwc..",
+  ".......Ww...",
+  ".......Ww...",
+  "pp....iWwi..",
+  "pPi...iWwi..",
+  "pPii..iWwi..",
+  "pP.iii.Ww...",
+  "pP.....Ww...",
+  "pp.....Ww...",
+  ".......Ww...",
+  "........w...",
+];
+const BRACKET_ANCHOR = 8, CUP_X = 8;
+const BRACKET_COLOURS = { p: "#1c1b1f", P: "#2f2d33", i: "#2f2d33", k: "#1c1b1f", c: "#4a4650", w: "#3b2716", W: "#5a3b20" };
+const FLAME_W = 9, FLAME_H = 14, FLAME_FRAMES = 8;
+const FLAME_COLOURS = ["#7a1e10", "#c2401a", "#ec7a1c", "#f7c23a", "#fff1a8"]; // outer to core
+
+function spriteCanvas(rows, colours) {
+  const c = document.createElement("canvas");
+  c.width = rows[0].length;
+  c.height = rows.length;
+  const g = c.getContext("2d");
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (!colours[ch]) return;
+    g.fillStyle = colours[ch];
+    g.fillRect(x, y, 1, 1);
+  }));
+  return c;
+}
+
+// Looping flame animation: a teardrop shape eaten into by noise that rises
+// through it; the noise repeats every 4 units, so frame 8 is frame 0 again.
+function flameFrames() {
+  const loopNoise = (x, y, k) => {
+    const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+    const h = (a, b) => hash(a, ((b % 4) + 4) % 4, k);
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const top = h(i, j) + (h(i + 1, j) - h(i, j)) * sx;
+    const bottom = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * sx;
+    return top + (bottom - top) * sy;
+  };
+  const frames = [];
+  for (let f = 0; f < FLAME_FRAMES; f++) {
+    const rows = [];
+    for (let y = 0; y < FLAME_H; y++) {
+      const up = (FLAME_H - 1 - y) / (FLAME_H - 1); // 0 at the base, 1 at the tip
+      const sway = Math.sin(up * 2.5 + (f / FLAME_FRAMES) * Math.PI * 2) * 0.9 * up;
+      // Teardrop: rounded at the base, widest a third of the way up, to a point.
+      const halfW = 4.4 * Math.sqrt(Math.max(0, Math.sin(Math.PI * Math.min(1, 0.16 + up * 0.92)))) + 0.3;
+      let row = "";
+      for (let x = 0; x < FLAME_W; x++) {
+        const across = Math.abs(x - (FLAME_W - 1) / 2 - sway) / halfW;
+        const n = loopNoise(x * 0.7, up * 2 + (f / FLAME_FRAMES) * 4, 50);
+        const heat = 1 - across - up * 0.45 + (n - 0.5) * (0.5 + up * 0.6); // licks more near the tip
+        row += heat > 0.72 ? "4" : heat > 0.52 ? "3" : heat > 0.32 ? "2" : heat > 0.16 ? "1" : heat > 0.04 ? "0" : ".";
+      }
+      rows.push(row);
+    }
+    frames.push(spriteCanvas(rows, Object.fromEntries(FLAME_COLOURS.map((c, i) => [String(i), c]))));
+  }
+  return frames;
+}
+
+const bracketSprite = spriteCanvas(BRACKET, BRACKET_COLOURS);
+const flames = flameFrames();
+const scene = paintScene();
+
+function drawScene(time) {
   ctx.imageSmoothingEnabled = false;
-  const { canvas: art, ox } = floorArt;
-  ctx.drawImage(art, originX - ox * scale, originY, art.width * scale, art.height * scale);
+  const { canvas: art, OX, OY, lights } = scene;
+  const at = (px, py) => [originX + (px - OX) * scale, originY + (py - OY) * scale];
+  ctx.drawImage(art, ...at(0, 0), art.width * scale, art.height * scale);
+
+  // Torchlight: each warm layer added on top, flickering with its flame.
+  ctx.globalCompositeOperation = "lighter";
+  lights.forEach(({ canvas: c, x0, y0 }, i) => {
+    ctx.globalAlpha = flicker(time, i);
+    ctx.drawImage(c, ...at(x0, y0), c.width * scale, c.height * scale);
+  });
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+
+  TORCHES.forEach((t, i) => {
+    const { wall } = torchWorld(t);
+    const p = toScreen(...wall);
+    const mirror = t.wall === "right" ? -1 : 1;
+    ctx.save();
+    ctx.translate(Math.round(p.x), Math.round(p.y));
+    ctx.scale(mirror * scale, scale);
+    ctx.drawImage(bracketSprite, 0, -BRACKET_ANCHOR);
+    const frame = flames[Math.floor(time / 90 + i * 3) % FLAME_FRAMES];
+    ctx.drawImage(frame, CUP_X + 0.5 - FLAME_W / 2, 1 - BRACKET_ANCHOR - FLAME_H);
+    ctx.restore();
+  });
+}
+
+// 0.7..1: a quick unsteady flicker, different for each torch.
+function flicker(time, i) {
+  const t = time / 1000;
+  return 0.85 + 0.09 * Math.sin(t * 9.1 + i * 2.1) + 0.06 * Math.sin(t * 23.7 + i * 4.3);
 }
 
 // The player is a floating skull sprite, bobbing gently over its shadow.
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 16;
+const ASSET_VERSION = 17;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -363,7 +693,7 @@ function drawHands(time, zoom, baseLift, bobRange, skullW) {
 function draw(time) {
   ctx.fillStyle = "#111";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  drawFloor();
+  drawScene(time);
   drawPlayer(time);
 }
 
