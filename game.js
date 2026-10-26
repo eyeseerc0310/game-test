@@ -1,44 +1,79 @@
-// Dungeon crawler — a floating skull in a ruined tower-top room. The room is
-// a painted, animated image (assets/room.gif) shown behind a see-through
-// canvas; the game lays an isometric grid over its floor, keeps the skull to
-// the walkable cobbles and away from the props, and draws the skull on top.
+// Dungeon crawler — a floating skull exploring painted rooms. Each room is an
+// animated image shown behind a see-through canvas; the game lays an
+// isometric grid over its floor, keeps the skull to the walkable cobbles and
+// away from the props, leads it through doorways to other rooms, and draws
+// the skull on top.
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-const roomImage = document.getElementById("room");
 
-// ---------- The room image ----------
-// Everything below is measured in pixels of the room image. The floor's grid:
-// one tile is 112 x 56 image px (2:1 isometric), with tile (0, 0) at the back
-// corner where the two back walls meet the floor. x runs down-right along the
-// right-hand wall, y down-left along the left-hand wall.
-const ROOM = { w: 1509, h: 1042 };
+// ---------- Rooms ----------
+// Each room is a painted image. Everything about a room is measured in its
+// image's pixels, and its floor has the same isometric grid: one tile is
+// 112 x 56 image px (2:1), with tile (0, 0) at the back corner where the two
+// back walls meet the floor. x runs down-right along the right-hand wall, y
+// down-left along the left-hand wall.
 const TILE_W = 112;
 const TILE_H = 56;
-const BACK_CORNER = { x: 755, y: 262 };
 const SPRITE_ZOOM = 1.3; // image px per skull art px
-
-// Where the skull may go: the cobbled floor, traced from the image, kept a
-// little in from the walls and short of the broken front edges.
-const FLOOR = [
-  [755, 296], [1308, 566], [1298, 588], [1250, 594], [1100, 606], [962, 630], [888, 684],
-  [866, 812], [806, 842], [266, 578], [244, 546],
-];
-// Props it can't pass through: footprints on the floor, as ellipses
-// (centre and radii) or polygons.
-const PROPS = [
-  { name: "barrel by the left wall", ellipse: [286, 502, 46, 26] },
-  { name: "stool", ellipse: [346, 472, 30, 17] },
-  { name: "table", polygon: [[340, 438], [492, 362], [522, 392], [372, 466]] },
-  { name: "bucket", ellipse: [520, 380, 24, 14] },
-  { name: "barrel on its side", ellipse: [615, 330, 44, 24] },
-  { name: "chest", polygon: [[736, 318], [790, 292], [850, 322], [796, 352]] },
-  { name: "planks and crates", ellipse: [940, 345, 44, 24] },
-  { name: "jar", ellipse: [1268, 500, 30, 17] },
-  { name: "barrel by the right wall", ellipse: [1328, 515, 40, 22] },
-];
-
 const PROP_CLEARANCE = 14; // extra image px kept clear around round props
+
+// floor: the walkable cobbles traced from the image, kept a little in from
+// the walls and short of broken edges. props: footprints the skull can't pass
+// through, as ellipses (centre and radii) or polygons. doors: a doorway's
+// opening in floor tiles (a stretch of the wall it's in, from the room side
+// into the wall); stepping past the wall line leads to another room.
+const ROOMS = {
+  tower: {
+    image: "room",
+    size: { w: 1509, h: 1042 },
+    backCorner: { x: 755, y: 262 },
+    floor: [
+      [755, 296], [1308, 566], [1298, 588], [1250, 594], [1100, 606], [962, 630], [888, 684],
+      [866, 812], [806, 842], [266, 578], [244, 546],
+    ],
+    props: [
+      { name: "barrel by the left wall", ellipse: [286, 502, 46, 26] },
+      { name: "stool", ellipse: [346, 472, 30, 17] },
+      { name: "table", polygon: [[340, 438], [492, 362], [522, 392], [372, 466]] },
+      { name: "bucket", ellipse: [520, 380, 24, 14] },
+      { name: "barrel on its side", ellipse: [615, 330, 44, 24] },
+      { name: "chest", polygon: [[736, 318], [790, 292], [850, 322], [796, 352]] },
+      { name: "planks and crates", ellipse: [940, 345, 44, 24] },
+      { name: "jar", ellipse: [1268, 500, 30, 17] },
+      { name: "barrel by the right wall", ellipse: [1328, 515, 40, 22] },
+    ],
+    // The archway in the right-hand wall (the wall at y = 0).
+    doors: [{ wall: "right", from: 6.15, to: 7.15, leadsTo: "cellar", arrive: { x: 1.1, y: 6.5, facing: "front-right" } }],
+  },
+  cellar: {
+    image: "room2",
+    size: { w: 1509, h: 1042 },
+    backCorner: { x: 765, y: 265 },
+    floor: [
+      [765, 299], [1240, 536], [1180, 570], [1060, 626], [962, 640], [905, 700], [782, 768],
+      [700, 760], [470, 640], [420, 610], [300, 560], [262, 548],
+    ],
+    props: [
+      { name: "crates", polygon: [[700, 300], [762, 270], [838, 306], [778, 338]] },
+      { name: "plank", ellipse: [852, 318, 26, 14] },
+      { name: "jar by the crates", ellipse: [706, 298, 22, 12] },
+      { name: "jar by the left wall", ellipse: [520, 386, 24, 13] },
+      { name: "barrel by the door", ellipse: [270, 496, 36, 20] },
+      { name: "small jar", ellipse: [322, 472, 20, 11] },
+      { name: "fallen stones", ellipse: [926, 352, 36, 18] },
+      { name: "stairs", polygon: [[960, 395], [1060, 345], [1215, 430], [1120, 485]] },
+      { name: "barrel by the stairs", ellipse: [1210, 488, 34, 19] },
+    ],
+    // The archway in the left-hand wall (the wall at x = 0).
+    doors: [{ wall: "left", from: 5.9, to: 7.1, leadsTo: "tower", arrive: { x: 6.65, y: 1.1, facing: "front-left" } }],
+  },
+};
+const DOOR_DEPTH = 0.6; // tiles of doorway floor behind the wall line
+const FLOOR_INSET = 0.6; // tiles the traced floor stops short of the walls
+
+let room = ROOMS.tower;
+const roomImages = Object.fromEntries(Object.values(ROOMS).map((r) => [r.image, document.getElementById(r.image)]));
 
 let scale = 1; // screen px per image px
 let originX = 0; // screen position of the image's top-left corner
@@ -48,17 +83,20 @@ function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   // Show the whole room, as large as fits, centred.
-  scale = Math.min(canvas.width / ROOM.w, canvas.height / ROOM.h);
-  originX = Math.round((canvas.width - ROOM.w * scale) / 2);
-  originY = Math.round((canvas.height - ROOM.h * scale) / 2);
-  Object.assign(roomImage.style, {
-    left: originX + "px",
-    top: originY + "px",
-    width: ROOM.w * scale + "px",
-    height: ROOM.h * scale + "px",
-    // Crisp pixels when enlarged; smooth when shrunk, so detail isn't dropped.
-    imageRendering: scale >= 1 ? "pixelated" : "auto",
-  });
+  scale = Math.min(canvas.width / room.size.w, canvas.height / room.size.h);
+  originX = Math.round((canvas.width - room.size.w * scale) / 2);
+  originY = Math.round((canvas.height - room.size.h * scale) / 2);
+  for (const [name, img] of Object.entries(roomImages)) {
+    Object.assign(img.style, {
+      display: name === room.image ? "block" : "none",
+      left: originX + "px",
+      top: originY + "px",
+      width: room.size.w * scale + "px",
+      height: room.size.h * scale + "px",
+      // Crisp pixels when enlarged; smooth when shrunk, so detail isn't dropped.
+      imageRendering: scale >= 1 ? "pixelated" : "auto",
+    });
+  }
 }
 window.addEventListener("resize", resize);
 resize();
@@ -66,8 +104,8 @@ resize();
 // Floor (tile) coordinates -> room image px. z lifts a point straight up.
 function toImage(x, y, z = 0) {
   return {
-    x: BACK_CORNER.x + (x - y) * (TILE_W / 2),
-    y: BACK_CORNER.y + ((x + y) * (TILE_H / 2) - z * TILE_H),
+    x: room.backCorner.x + (x - y) * (TILE_W / 2),
+    y: room.backCorner.y + ((x + y) * (TILE_H / 2) - z * TILE_H),
   };
 }
 
@@ -86,18 +124,68 @@ function insidePolygon([px, py], points) {
   return inside;
 }
 
+// A doorway's floor, in tiles: across its opening, from inside the room
+// (where the traced floor stops) to DOOR_DEPTH behind the wall line.
+function doorArea(door) {
+  const across = [door.from, door.to], into = [-DOOR_DEPTH, FLOOR_INSET + 0.05];
+  return door.wall === "left" ? { x: into, y: across } : { x: across, y: into };
+}
+
+function inArea(x, y, area) {
+  return x >= area.x[0] && x <= area.x[1] && y >= area.y[0] && y <= area.y[1];
+}
+
+// The doorway the skull has stepped through, past its wall line, if any.
+function doorAt(x, y) {
+  return room.doors.find((d) => inArea(x, y, doorArea(d)) && (d.wall === "left" ? x : y) < 0);
+}
+
 // Can the skull's centre stand at this floor position?
 function walkable(x, y) {
+  if (room.doors.some((d) => inArea(x, y, doorArea(d)))) return true;
   const p = toImage(x, y);
   const at = [p.x, p.y];
-  if (!insidePolygon(at, FLOOR)) return false;
-  return !PROPS.some(({ ellipse, polygon }) => {
+  if (!insidePolygon(at, room.floor)) return false;
+  return !room.props.some(({ ellipse, polygon }) => {
     if (polygon) return insidePolygon(at, polygon);
     // Kept a little further off than the footprint, so the skull's sprite
     // doesn't sit over the prop.
     const [cx, cy, rx, ry] = ellipse;
     return ((p.x - cx) / (rx + PROP_CLEARANCE)) ** 2 + ((p.y - cy) / (ry + PROP_CLEARANCE / 2)) ** 2 < 1;
   });
+}
+
+// ---------- Moving between rooms ----------
+// Through a doorway the screen fades to black, the next room is put in
+// place with the skull just inside its doorway, and it fades back in.
+const FADE = 0.45; // seconds each way
+const transition = { t: 0, to: null, arrive: null, swapped: false }; // t runs 0..2 * FADE
+
+function startTransition(door) {
+  Object.assign(transition, { t: 0, to: door.leadsTo, arrive: door.arrive, swapped: false });
+}
+
+function updateTransition(dt) {
+  if (!transition.to) return;
+  transition.t += dt;
+  if (!transition.swapped && transition.t >= FADE) {
+    room = ROOMS[transition.to];
+    resize();
+    player.x = transition.arrive.x;
+    player.y = transition.arrive.y;
+    player.facing = transition.arrive.facing;
+    for (const h of hands) Object.assign(h, { x: player.x, y: player.y });
+    transition.swapped = true;
+  }
+  if (transition.t >= 2 * FADE) transition.to = null;
+}
+
+// How dark the screen is: 0 normally, 1 at the middle of a transition.
+function fadeAmount() {
+  if (!transition.to) return 0;
+  const t = transition.t / FADE;
+  const k = t < 1 ? t : 2 - t;
+  return k * k * (3 - 2 * k); // ease in and out
 }
 
 // ---------- Player ----------
@@ -115,6 +203,9 @@ const TURN_DELAY = 0.08; // seconds
 let facingHeld = 0;
 
 function update(dt) {
+  updateTransition(dt);
+  if (transition.to) return; // no moving while the screen fades
+
   // WASD follows the screen: W is up the screen, which is diagonal in the world.
   let dx = 0, dy = 0;
   if (keys.has("w")) { dx -= 1; dy -= 1; }
@@ -150,6 +241,8 @@ function update(dt) {
     if (walkable(player.x + mx, player.y + my)) { player.x += mx; player.y += my; }
     else if (walkable(player.x + mx, player.y)) player.x += mx;
     else if (walkable(player.x, player.y + my)) player.y += my;
+    const door = doorAt(player.x, player.y);
+    if (door) startTransition(door);
   }
 
   // Hands ease toward the skull, each at its own pace (frame-rate independent).
@@ -164,7 +257,7 @@ function update(dt) {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 20;
+const ASSET_VERSION = 21;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -260,8 +353,15 @@ function drawBarriers() {
     ctx.lineWidth = 2;
     ctx.stroke();
   };
-  outline(FLOOR, "#3f6");
-  for (const { ellipse, polygon } of PROPS) {
+  outline(room.floor, "#3f6");
+  for (const door of room.doors) {
+    const a = doorArea(door);
+    outline([[a.x[0], a.y[0]], [a.x[1], a.y[0]], [a.x[1], a.y[1]], [a.x[0], a.y[1]]].map(([x, y]) => {
+      const p = toImage(x, y);
+      return [p.x, p.y];
+    }), "#4af");
+  }
+  for (const { ellipse, polygon } of room.props) {
     if (polygon) outline(polygon, "#f43");
     else {
       const [cx, cy, rx, ry] = ellipse;
@@ -278,6 +378,11 @@ function draw(time) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (DEBUG) drawBarriers();
   drawPlayer(time);
+  const fade = fadeAmount();
+  if (fade > 0) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${fade})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 }
 
 let last = performance.now();
