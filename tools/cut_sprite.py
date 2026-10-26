@@ -1,11 +1,13 @@
 # Cut a sprite out of an image and shrink it to its real pixel size.
 # The background is either real transparency or a fake grey/white checkerboard.
-# Usage: python3 tools/cut_sprite.py <source.png> <out.png> <preview.png>
+# Usage: python3 tools/cut_sprite.py <source.png> <out.png> <preview.png> [height]
+# Give a height (in art pixels) to match another view of the same character.
 import sys
 from PIL import Image
 import numpy as np
 from collections import deque
 src, out, preview = sys.argv[1:4]
+target_h = int(sys.argv[4]) if len(sys.argv) > 4 else None
 ART_PX = 13  # source pixels per art pixel in the drawings so far
 im = Image.open(src)
 alpha = np.asarray(im.convert('RGBA'))[..., 3]
@@ -31,7 +33,8 @@ ys, xs = np.where(~bg)
 y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
 rgb = a[y0:y1, x0:x1]; fg = ~bg[y0:y1, x0:x1]
 # Downscale so each art pixel becomes one real pixel.
-tw = round((x1 - x0) / ART_PX); th = round((y1 - y0) / ART_PX)
+px = (y1 - y0) / target_h if target_h else ART_PX
+tw = round((x1 - x0) / px); th = round((y1 - y0) / px)
 res = np.zeros((th, tw, 4), np.uint8)
 for j in range(th):
     for i in range(tw):
