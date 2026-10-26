@@ -30,6 +30,10 @@ def is_bone(px):
     return (px.mean(1) > 110) & ~is_eye(px)
 
 
+def is_outline(px):
+    return (px.mean(1) < 70) & ~is_eye(px)
+
+
 # Bone is measured on its own: views with less black outline would otherwise
 # look brighter and be darkened to compensate.
 ref = imgs[0][imgs[0][..., 3] > 0][:, :3]
@@ -42,7 +46,9 @@ for im in imgs:
     eye = is_eye(px)
     measure = {False: is_bone(px), True: eye}
     for group in (False, True):
-        sel = eye == group
+        # The black outline isn't shifted, so it snaps to the reference's black
+        # instead of being lifted along with the bone colours.
+        sel = (eye == group) & ~is_outline(px)
         if measure[group].sum() < 2:
             continue
         mean, std = stats(px[measure[group]])

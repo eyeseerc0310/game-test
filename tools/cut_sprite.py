@@ -1,14 +1,18 @@
 # Cut a sprite out of an image and shrink it to its real pixel size.
 # The background is either real transparency or a fake grey/white checkerboard.
-# Usage: python3 tools/cut_sprite.py <source.png> <out.png> <preview.png> [height]
+# Usage: python3 tools/cut_sprite.py <source.png> <out.png> <preview.png> [height] [--outline]
 # Give a height (in art pixels) to match another view of the same character;
 # views that are mostly cranium need a smaller height to cover the same area.
 import sys
 from PIL import Image
 import numpy as np
 from collections import deque
-src, out, preview = sys.argv[1:4]
-target_h = int(sys.argv[4]) if len(sys.argv) > 4 else None
+# --outline redraws a solid 1 px black edge: shrinking art to fewer pixels than
+# it was drawn with breaks up its thin outline.
+outline = '--outline' in sys.argv
+args = [a for a in sys.argv[1:] if a != '--outline']
+src, out, preview = args[:3]
+target_h = int(args[3]) if len(args) > 3 else None
 ART_PX = 13  # source pixels per art pixel in the drawings so far
 im = Image.open(src)
 alpha = np.asarray(im.convert('RGBA'))[..., 3]
@@ -46,6 +50,12 @@ for j in range(th):
         # median keeps colours crisp instead of blending neighbouring art pixels
         c = rgb[ya:yb, xa:xb][m]
         res[j, i, :3] = np.median(c, axis=0); res[j, i, 3] = 255
+if outline:
+    solid = res[..., 3] > 0
+    pad = np.pad(solid, 1)
+    inner = pad[:-2, 1:-1] & pad[2:, 1:-1] & pad[1:-1, :-2] & pad[1:-1, 2:]
+    dark = res[..., :3].astype(int).sum(2)
+    res[solid & ~inner, :3] = res[solid][dark[solid].argmin(), :3]   # darkest colour in the art
 img = Image.fromarray(res, 'RGBA'); img.save(out)
 big = Image.new('RGBA', (tw*8, th*8), (40, 40, 50, 255)); big.alpha_composite(img.resize((tw*8, th*8), Image.NEAREST)); big.save(preview)
 print((x1-x0, y1-y0), '->', img.size)
