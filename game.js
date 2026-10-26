@@ -5,8 +5,8 @@ const ctx = canvas.getContext("2d");
 
 // The world is measured in tiles; the camera turns tiles into screen pixels.
 const room = { w: 10, h: 10 };
-// speed in tiles per second; facing is -1 (left) or 1 (right) on screen
-const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4, facing: -1 };
+// speed in tiles per second; facing is "left", "right" or "front" on screen
+const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4, facing: "front" };
 
 const TILE_W = 64; // width of one floor diamond on screen, before scaling
 const TILE_H = 32; // height of one floor diamond (2:1 isometric)
@@ -53,9 +53,11 @@ function update(dt) {
   if (keys.has("a")) { dx -= 1; dy += 1; }
   if (keys.has("d")) { dx += 1; dy -= 1; }
 
-  // Face the way we last moved sideways; W and S alone keep the old facing.
+  // A and D turn to the side (they win on diagonals), S faces the camera,
+  // W alone keeps the old facing.
   const sideways = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
-  if (sideways) player.facing = sideways;
+  if (sideways) player.facing = sideways > 0 ? "right" : "left";
+  else if (keys.has("s") && !keys.has("w")) player.facing = "front";
 
   // Same speed in every direction.
   const len = Math.hypot(dx, dy);
@@ -97,9 +99,14 @@ function drawFloor() {
 }
 
 // The player is a floating skull sprite, bobbing gently over its shadow.
-// The art faces left; it is mirrored when the player last moved right.
-const skull = new Image();
-skull.src = "assets/skull-side.png";
+// The side art faces left; it is mirrored to face right.
+function loadImage(src) {
+  const img = new Image();
+  img.src = src;
+  return img;
+}
+const skullFront = loadImage("assets/skull.png");
+const skullSide = loadImage("assets/skull-side.png");
 const ART_W = 64; // reference width, so every sprite gets the same pixel size
 
 function drawPlayer(time) {
@@ -115,6 +122,7 @@ function drawPlayer(time) {
   ctx.ellipse(foot.x, foot.y, r, r / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  const skull = player.facing === "front" ? skullFront : skullSide;
   if (!skull.complete || !skull.naturalWidth) return;
   // Whole-number zoom when the art fits, so every art pixel is the same size.
   let zoom = (TILE_W * scale * 0.75) / ART_W;
@@ -125,7 +133,7 @@ function drawPlayer(time) {
   ctx.imageSmoothingEnabled = false;
   ctx.save();
   ctx.translate(Math.round(foot.x), Math.round(foot.y - lift));
-  if (player.facing > 0) ctx.scale(-1, 1);
+  if (player.facing === "right") ctx.scale(-1, 1);
   ctx.drawImage(skull, -Math.round(w / 2), -h, w, h);
   ctx.restore();
 }
