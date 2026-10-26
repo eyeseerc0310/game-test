@@ -117,9 +117,11 @@ function drawFloor() {
 // The player is a floating skull sprite, bobbing gently over its shadow.
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
+// Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
+const ASSET_VERSION = 9;
 function loadImage(src) {
   const img = new Image();
-  img.src = src;
+  img.src = src + "?v=" + ASSET_VERSION;
   return img;
 }
 const skullFront = loadImage("assets/skull.png");
