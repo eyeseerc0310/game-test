@@ -103,16 +103,40 @@ function update(dt) {
 // Painted once, pixel by pixel, at art resolution. Stones are a jittered
 // Voronoi pattern laid out on the floor itself (so they're squashed by the
 // isometric view), joined by black mortar, lit from the top-left, and limited
-// to a small stone palette that shares the skull's outline black.
+// to a small stone palette that shares the skull's outline black. Sparse moss
+// grows in the joints, and a few puddles sit in the low spots with water
+// running out along the joints around them.
 const STONES_PER_TILE = 3;
 const SLAB = 10; // art px of stone edge visible below the floor's front sides
 const MORTAR = "#1a1915"; // the skull's outline black
 const STONE = ["#2b2a2c", "#38363a", "#46434a", "#55515a", "#66616a", "#7a7480"]; // dark -> light
+const MOSS = ["#27301d", "#36422a", "#4b5a35"]; // dark -> light
+const WATER = ["#141b24", "#1d2733", "#2a3a4b", "#56708a"]; // deep, mid, shallow rim, glint
+// Palette indices: mortar, then the stone, moss and water ramps.
+const P_STONE = 1, P_MOSS = P_STONE + STONE.length, P_WATER = P_MOSS + MOSS.length;
+
+// Puddles in tile units, kept clear of the skull's starting spot.
+const PUDDLES = [
+  { x: 2.3, y: 6.9, r: 0.95 },
+  { x: 7.4, y: 2.5, r: 0.85 },
+  { x: 6.6, y: 8.1, r: 0.55 },
+];
+const MOSS_PATCHES = 0.66; // noise level above which moss can grow; higher is sparser
 
 function hash(a, b, c = 0) {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296; // 0..1
+}
+
+// Smooth value noise, 0..1, with features about one unit apart.
+function noise(x, y, k) {
+  const i = Math.floor(x), j = Math.floor(y);
+  const fx = x - i, fy = y - j;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const top = hash(i, j, k) + (hash(i + 1, j, k) - hash(i, j, k)) * sx;
+  const bottom = hash(i, j + 1, k) + (hash(i + 1, j + 1, k) - hash(i, j + 1, k)) * sx;
+  return top + (bottom - top) * sy;
 }
 
 // Jittered seed point of stone cell (i, j), in tile units.
@@ -133,11 +157,11 @@ function paintFloor() {
   art.width = W;
   art.height = H;
   const g = art.getContext("2d");
-  const rgb = [MORTAR, ...STONE].map((c) => [1, 3, 5].map((k) => parseInt(c.slice(k, k + 2), 16)));
+  const rgb = [MORTAR, ...STONE, ...MOSS, ...WATER].map((c) => [1, 3, 5].map((k) => parseInt(c.slice(k, k + 2), 16)));
   const img = g.createImageData(W, H);
-  const put = (px, py, shade) => {
+  const put = (px, py, colour) => {
     const o = (py * W + px) * 4;
-    [img.data[o], img.data[o + 1], img.data[o + 2], img.data[o + 3]] = [...rgb[shade + 1], 255];
+    [img.data[o], img.data[o + 1], img.data[o + 2], img.data[o + 3]] = [...rgb[colour], 255];
   };
 
   for (let py = 0; py < H; py++) {
@@ -148,24 +172,58 @@ function paintFloor() {
       const x = (a + b) / 2;
       const y = (b - a) / 2;
       if (x >= 0 && x < room.w && y >= 0 && y < room.h) {
-        put(px, py, stoneShade(x, y, px, py));
+        put(px, py, floorColour(x, y, px, py));
         continue;
       }
       // Below the two front edges: the slab's cut stone sides.
       const xe = a + room.h, ye = room.w - a; // where straight up meets each edge
       const downL = py + 0.5 - (xe + room.h) * TILE_H / 2;
       const downR = py + 0.5 - (room.w + ye) * TILE_H / 2;
-      if (xe >= 0 && xe <= room.w && downL > 0 && downL <= SLAB) put(px, py, sideShade(xe, downL, 2));
-      else if (ye >= 0 && ye <= room.h && downR > 0 && downR <= SLAB) put(px, py, sideShade(ye, downR, 1));
+      if (xe >= 0 && xe <= room.w && downL > 0 && downL <= SLAB) put(px, py, P_STONE + sideShade(xe, downL, 2));
+      else if (ye >= 0 && ye <= room.h && downR > 0 && downR <= SLAB) put(px, py, P_STONE + sideShade(ye, downR, 1));
     }
   }
   g.putImageData(img, 0, 0);
   return { canvas: art, ox };
 }
 
-// Shade index into STONE (-1 is mortar) for a floor point.
-function stoneShade(x, y, px, py) {
-  // Nearest and second-nearest stone seeds.
+// Palette index for a floor point: water, then moss, then bare stone.
+function floorColour(x, y, px, py) {
+  const c = cobble(x, y);
+  const mortar = c.edge < 0.045;
+
+  // Wetness: above 0 inside a puddle; a little below 0 near one.
+  let wet = -Infinity;
+  for (const p of PUDDLES) wet = Math.max(wet, 1 - Math.hypot(x - p.x, y - p.y) / p.r);
+  wet += (noise(x * 2.5, y * 2.5, 7) - 0.5) * 0.5; // ragged, uneven shores
+  if (wet > 0.12) {
+    const deep = wet > 0.45;
+    // In the shallows the tops of the stones break the surface, wet and dark.
+    if (!deep && !mortar && c.edge > 0.085 && wet < 0.34) {
+      return P_STONE + Math.max(0, stoneShade(c, x, y, px, py) - 2);
+    }
+    // Light catches the surface in short flat streaks out in the deep part.
+    if (deep && hash(Math.floor(px / 3), py, 8) < 0.012) return P_WATER + 3;
+    if (wet < 0.18) return P_WATER + 2; // shallow rim
+    return P_WATER + (deep || mortar ? 0 : 1);
+  }
+  // Water seeps out along the joints, further in some directions than others.
+  if (mortar && wet > -0.25 - noise(x * 4, y * 4, 9) * 0.35) return P_WATER + (hash(px, py, 10) < 0.15 ? 2 : 1);
+
+  // Moss: only inside a few patches, in the joints and around stone rims.
+  const m = noise(x * 1.4, y * 1.4, 11);
+  if (m > MOSS_PATCHES && (mortar || c.edge < 0.1)) {
+    const lush = (m - MOSS_PATCHES) / (1 - MOSS_PATCHES); // 0 at a patch's edge, 1 in its middle
+    if (hash(px, py, 12) < 0.25 + lush * 0.6) return P_MOSS + (mortar ? 0 : hash(px, py, 13) < 0.5 ? 1 : 2);
+  }
+
+  if (mortar) return 0;
+  // Stones near a puddle are damp and a shade darker.
+  return P_STONE + Math.max(0, stoneShade(c, x, y, px, py) - (wet > -0.12 ? 1 : 0));
+}
+
+// Nearest stone and how close the point is to the joint around it.
+function cobble(x, y) {
   const ci = Math.floor(x * STONES_PER_TILE), cj = Math.floor(y * STONES_PER_TILE);
   let d1 = Infinity, d2 = Infinity, near = null;
   for (let j = cj - 1; j <= cj + 1; j++) {
@@ -176,9 +234,11 @@ function stoneShade(x, y, px, py) {
       else if (d < d2) d2 = d;
     }
   }
-  const edge = d2 - d1; // 0 on the line between two stones
-  if (edge < 0.045) return -1;
+  return { edge: d2 - d1, near }; // edge is 0 on the line between two stones
+}
 
+// Shade index into STONE for a point on a stone.
+function stoneShade({ edge, near }, x, y, px, py) {
   // Each stone gets its own tone; a few speckles break up flat areas.
   let shade = 2 + Math.floor(hash(near.i, near.j, 3) * 3) - 1; // 1..3
   if (hash(px, py, 4) < 0.07) shade += hash(px, py, 5) < 0.5 ? -1 : 1;
@@ -214,7 +274,7 @@ function drawFloor() {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 15;
+const ASSET_VERSION = 16;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
