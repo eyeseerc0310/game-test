@@ -54,32 +54,31 @@ const ROOMS = {
     torches: [{ x: 71.7, y: 57.7 }, { x: 132.1, y: 42.8 }, { x: 202.1, y: 84.5 }],
   },
   cellar: {
-    pixels: CELLAR_PIXELS,
-    alongX: [13.75, 5.62],
-    alongY: [-13.75, 5.62],
-    backCorner: { x: 149.0, y: 98.8 },
-    skullScale: 0.32, // room px per skull pixel: the same size against the picture as in the tower
-    glowR: 34,
+    pixels: CELLAR_PIXELS, // traced at the tower's pixel size, so both rooms share one scale
+    alongX: [10.1, 4.1],
+    alongY: [-10.1, 4.1],
+    backCorner: { x: 110.1, y: 72.5 },
+    skullScale: 0.235, // room px per skull pixel, the same as the tower
     floor: [
-      [149.0, 105.1], [279.1, 158.5], [284.0, 165.5], [264.4, 183.9], [244.7, 195.8], [215.3, 199.5],
-      [209.1, 213.2], [158.8, 235.1], [115.9, 215.2], [102.4, 195.8], [55.7, 170.9], [39.8, 158.5],
-      [38.5, 148.6],
+      [110.1, 77.1], [205.7, 116.1], [209.3, 121.1], [194.9, 134.6], [180.4, 143.3], [158.8, 146.0],
+      [154.3, 156.0], [117.3, 171.9], [85.7, 157.4], [75.8, 143.3], [41.5, 125.1], [29.8, 116.1],
+      [28.9, 108.8],
     ],
     props: [
-      { name: "barrel by the door", ellipse: [45.4, 138.6, 7.4, 3.5] },
-      { name: "jar by the door", ellipse: [57.4, 141.1, 4.4, 2.2] },
-      { name: "planks by the door", ellipse: [98.7, 116.2, 4.4, 2.0] },
-      { name: "fallen stones", ellipse: [117.1, 103.8, 7.4, 3.0] },
-      { name: "barrel", ellipse: [137.2, 97.6, 7.9, 3.2] },
-      { name: "crate", polygon: [[152.7, 95.1], [163.7, 90.1], [175.5, 95.1], [164.2, 100.1]] },
-      { name: "stones by the stairs", ellipse: [195.6, 111.3, 8.3, 3.5] },
-      { name: "stairs", polygon: [[205.4, 118.7], [225.1, 108.8], [266.8, 128.7], [247.2, 142.4]] },
-      { name: "barrel by the stairs", ellipse: [264.4, 148.6, 7.4, 3.2] },
-      { name: "jar by the stairs", ellipse: [272.9, 154.8, 4.4, 2.2] },
+      { name: "barrel by the door", ellipse: [33.9, 101.6, 5.4, 2.5] },
+      { name: "jar by the door", ellipse: [42.8, 103.4, 3.2, 1.6] },
+      { name: "planks by the door", ellipse: [73.1, 85.2, 3.2, 1.5] },
+      { name: "fallen stones", ellipse: [86.6, 76.2, 5.4, 2.2] },
+      { name: "barrel", ellipse: [101.4, 71.6, 5.8, 2.4] },
+      { name: "crate", polygon: [[112.8, 69.8], [120.9, 66.2], [129.6, 69.8], [121.3, 73.4]] },
+      { name: "stones by the stairs", ellipse: [144.4, 81.6, 6.1, 2.5] },
+      { name: "stairs", polygon: [[151.6, 87.1], [166.0, 79.8], [196.7, 94.3], [182.2, 104.3]] },
+      { name: "barrel by the stairs", ellipse: [194.9, 108.8, 5.4, 2.4] },
+      { name: "jar by the stairs", ellipse: [201.2, 113.3, 3.2, 1.6] },
     ],
     // The archway in the left-hand wall (the wall at x = 0).
     doors: [{ wall: "left", from: 5.55, to: 6.45, leadsTo: "tower", arrive: { x: 5.95, y: 1.3, facing: "front-left" } }],
-    torches: [{ x: 43.4, y: 115.3 }, { x: 98.7, y: 83.9 }, { x: 175.5, y: 62.8 }, { x: 226.6, y: 75.7 }, { x: 269.3, y: 101.8 }],
+    torches: [{ x: 32.5, y: 84.5 }, { x: 73.1, y: 61.7 }, { x: 129.6, y: 46.2 }, { x: 167.1, y: 55.7 }, { x: 198.5, y: 74.7 }],
   },
 };
 const DOOR_DEPTH = 0.6; // tiles of doorway floor behind the wall line
@@ -397,7 +396,7 @@ function update(dt) {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 24;
+const ASSET_VERSION = 25;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
