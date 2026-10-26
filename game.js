@@ -118,7 +118,7 @@ function drawFloor() {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 12;
+const ASSET_VERSION = 13;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -141,11 +141,12 @@ const SPRITES = {
 };
 const ART_W = 64; // reference width, so every sprite gets the same pixel size
 
-// Facing front, bony hands reach out from under the jaw on both sides. The hand
-// is cut at the front skull's pixel size, so they read as one drawing.
+// Facing front, bony hands float a little out from the jaw on both sides. The
+// hand uses the skull's pixel size, colours and black outline, so they read as
+// one drawing.
 const hand = loadImage("assets/hand.png");
-const HAND_OVERLAP = 14; // art px the hand tucks in under the skull's side
-const HAND_DROP = 8;     // art px the hand reaches below the skull
+const HAND_OVERLAP = -2; // art px the hand tucks under the skull's side (negative: a gap)
+const HAND_DROP = 6;     // art px the hand reaches below the skull
 
 function drawPlayer(time) {
   const cx = player.x + player.size / 2;
