@@ -8,8 +8,11 @@ const room = { w: 10, h: 10 };
 // speed in tiles per second; facing is one of the keys of SPRITES below
 const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4, facing: "front" };
 
-const TILE_W = 64; // width of one floor diamond on screen, before scaling
-const TILE_H = 32; // height of one floor diamond (2:1 isometric)
+// Everything is measured in art pixels (one pixel of the drawings); `scale` is
+// how many screen pixels one art pixel covers, shared by floor and sprites so
+// they read as one drawing.
+const TILE_W = 96; // width of one floor diamond in art pixels
+const TILE_H = 48; // height of one floor diamond (2:1 isometric)
 
 let scale = 1;
 let originX = 0;
@@ -19,14 +22,16 @@ function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  // Fit the whole room on screen with some margin, never bigger than 1.5x.
+  // Fit the whole room on screen with some margin. Whole-number zoom when it
+  // fits, so every art pixel is the same size; never bigger than 3x.
   const roomPxW = (room.w + room.h) * TILE_W / 2;
   const roomPxH = (room.w + room.h) * TILE_H / 2 + TILE_H * 2;
-  scale = Math.min(1.5, (canvas.width * 0.9) / roomPxW, (canvas.height * 0.85) / roomPxH);
+  scale = Math.min(3, (canvas.width * 0.9) / roomPxW, (canvas.height * 0.85) / roomPxH);
+  if (scale >= 1) scale = Math.floor(scale);
 
-  // Put the middle of the room in the middle of the screen.
-  originX = canvas.width / 2 - ((room.w - room.h) * TILE_W / 4) * scale;
-  originY = canvas.height / 2 - ((room.w + room.h) * TILE_H / 4) * scale;
+  // Put the middle of the room in the middle of the screen, on a whole pixel.
+  originX = Math.round(canvas.width / 2 - ((room.w - room.h) * TILE_W / 4) * scale);
+  originY = Math.round(canvas.height / 2 - ((room.w + room.h) * TILE_H / 4) * scale);
 }
 window.addEventListener("resize", resize);
 resize();
@@ -94,38 +99,122 @@ function update(dt) {
   }
 }
 
-function polygon(points, fill, stroke) {
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (const p of points.slice(1)) ctx.lineTo(p.x, p.y);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.stroke();
+// ---------- Cobblestone floor ----------
+// Painted once, pixel by pixel, at art resolution. Stones are a jittered
+// Voronoi pattern laid out on the floor itself (so they're squashed by the
+// isometric view), joined by black mortar, lit from the top-left, and limited
+// to a small stone palette that shares the skull's outline black.
+const STONES_PER_TILE = 3;
+const SLAB = 10; // art px of stone edge visible below the floor's front sides
+const MORTAR = "#1a1915"; // the skull's outline black
+const STONE = ["#2b2a2c", "#38363a", "#46434a", "#55515a", "#66616a", "#7a7480"]; // dark -> light
+
+function hash(a, b, c = 0) {
+  let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296; // 0..1
+}
+
+// Jittered seed point of stone cell (i, j), in tile units.
+function seed(i, j) {
+  return {
+    x: (i + 0.2 + hash(i, j, 1) * 0.6) / STONES_PER_TILE,
+    y: (j + 0.2 + hash(i, j, 2) * 0.6) / STONES_PER_TILE,
+  };
+}
+
+const floorArt = paintFloor();
+
+function paintFloor() {
+  const ox = room.h * TILE_W / 2; // art x of the floor's top corner
+  const W = (room.w + room.h) * TILE_W / 2;
+  const H = (room.w + room.h) * TILE_H / 2 + SLAB;
+  const art = document.createElement("canvas");
+  art.width = W;
+  art.height = H;
+  const g = art.getContext("2d");
+  const rgb = [MORTAR, ...STONE].map((c) => [1, 3, 5].map((k) => parseInt(c.slice(k, k + 2), 16)));
+  const img = g.createImageData(W, H);
+  const put = (px, py, shade) => {
+    const o = (py * W + px) * 4;
+    [img.data[o], img.data[o + 1], img.data[o + 2], img.data[o + 3]] = [...rgb[shade + 1], 255];
+  };
+
+  for (let py = 0; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      // Art pixel centre -> floor position in tiles.
+      const a = (px + 0.5 - ox) / (TILE_W / 2);
+      const b = (py + 0.5) / (TILE_H / 2);
+      const x = (a + b) / 2;
+      const y = (b - a) / 2;
+      if (x >= 0 && x < room.w && y >= 0 && y < room.h) {
+        put(px, py, stoneShade(x, y, px, py));
+        continue;
+      }
+      // Below the two front edges: the slab's cut stone sides.
+      const xe = a + room.h, ye = room.w - a; // where straight up meets each edge
+      const downL = py + 0.5 - (xe + room.h) * TILE_H / 2;
+      const downR = py + 0.5 - (room.w + ye) * TILE_H / 2;
+      if (xe >= 0 && xe <= room.w && downL > 0 && downL <= SLAB) put(px, py, sideShade(xe, downL, 2));
+      else if (ye >= 0 && ye <= room.h && downR > 0 && downR <= SLAB) put(px, py, sideShade(ye, downR, 1));
+    }
   }
+  g.putImageData(img, 0, 0);
+  return { canvas: art, ox };
+}
+
+// Shade index into STONE (-1 is mortar) for a floor point.
+function stoneShade(x, y, px, py) {
+  // Nearest and second-nearest stone seeds.
+  const ci = Math.floor(x * STONES_PER_TILE), cj = Math.floor(y * STONES_PER_TILE);
+  let d1 = Infinity, d2 = Infinity, near = null;
+  for (let j = cj - 1; j <= cj + 1; j++) {
+    for (let i = ci - 1; i <= ci + 1; i++) {
+      const s = seed(i, j);
+      const d = Math.hypot(x - s.x, y - s.y);
+      if (d < d1) { d2 = d1; d1 = d; near = { i, j, s }; }
+      else if (d < d2) d2 = d;
+    }
+  }
+  const edge = d2 - d1; // 0 on the line between two stones
+  if (edge < 0.045) return -1;
+
+  // Each stone gets its own tone; a few speckles break up flat areas.
+  let shade = 2 + Math.floor(hash(near.i, near.j, 3) * 3) - 1; // 1..3
+  if (hash(px, py, 4) < 0.07) shade += hash(px, py, 5) < 0.5 ? -1 : 1;
+
+  // Bevel: the stone's top-left rim catches light, its bottom-right rim is in shade.
+  if (edge < 0.11) {
+    const sx = (x - near.s.x) - (y - near.s.y); // screen direction from the stone's middle
+    const sy = (x - near.s.x) + (y - near.s.y);
+    const toLight = -(sx * 0.45 + sy * 0.9);
+    if (toLight > 0.02) shade += 2;
+    else if (toLight < -0.02) shade -= 1;
+  }
+  return Math.max(0, Math.min(STONE.length - 1, shade));
+}
+
+// Cut-stone side of the slab: two courses of blocks; `lit` is 2 on the
+// left face (towards the light) and 1 on the right.
+function sideShade(along, down, lit) {
+  const course = down <= SLAB / 2 ? 0 : 1;
+  if (Math.abs(down - SLAB / 2) < 0.5 || down > SLAB - 1) return -1; // mortar between courses, dark bottom
+  const u = along * 54 + course * 9; // art px along the edge, courses offset
+  if (u % 18 < 1) return -1; // vertical joints
+  return Math.max(0, lit - (course ? 1 : 0) - (hash(Math.floor(u / 18), course, 6) < 0.3 ? 1 : 0));
 }
 
 function drawFloor() {
-  ctx.lineWidth = 1;
-  for (let y = 0; y < room.h; y++) {
-    for (let x = 0; x < room.w; x++) {
-      const shade = (x + y) % 2 ? "#2a2a33" : "#26262e";
-      polygon(
-        [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)],
-        shade,
-        "#1b1b22"
-      );
-    }
-  }
+  ctx.imageSmoothingEnabled = false;
+  const { canvas: art, ox } = floorArt;
+  ctx.drawImage(art, originX - ox * scale, originY, art.width * scale, art.height * scale);
 }
 
 // The player is a floating skull sprite, bobbing gently over its shadow.
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 14;
+const ASSET_VERSION = 15;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -146,7 +235,6 @@ const SPRITES = {
   "back-left": skullBackThreeQuarter,
   "back-right": skullBackThreeQuarter,
 };
-const ART_W = 64; // reference width, so every sprite gets the same pixel size
 
 // Facing front, bony hands float a little out from the jaw on both sides. The
 // hand uses the skull's pixel size, colours and black outline, so they read as
@@ -170,16 +258,14 @@ function drawPlayer(time) {
 
   // Shadow on the floor, smaller while the skull is higher up.
   const r = TILE_W * scale * 0.24 * (1 - bob * 0.2);
-  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
   ctx.beginPath();
   ctx.ellipse(foot.x, foot.y, r, r / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
   const skull = SPRITES[player.facing];
   if (!skull.complete || !skull.naturalWidth) return;
-  // Whole-number zoom when the art fits, so every art pixel is the same size.
-  let zoom = (TILE_W * scale * 0.75) / ART_W;
-  if (zoom >= 1) zoom = Math.floor(zoom);
+  const zoom = scale; // sprites share the floor's art pixel size
   const w = Math.round(skull.naturalWidth * zoom);
   const h = Math.round(skull.naturalHeight * zoom);
   const baseLift = TILE_H * 0.35 * scale;
