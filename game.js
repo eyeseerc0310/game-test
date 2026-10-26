@@ -116,8 +116,8 @@ function update(dt) {
 // Sparse moss grows in the joints, and a few puddles sit in the low spots with
 // water running out along the joints around them.
 const STONES_PER_TILE = 3;
-const MORTAR = "#1a1915"; // the skull's outline black
-const STONE = ["#2b2a2c", "#38363a", "#46434a", "#55515a", "#66616a", "#7a7480"]; // dark -> light
+const MORTAR = "#141012"; // near-black, close to the skull's outline
+const STONE = ["#1e1a1d", "#2a2428", "#352e33", "#423a3e", "#544a4c", "#685b5b"]; // dark mauve-greys; torchlight brings the warmth
 const MOSS = ["#27301d", "#36422a", "#4b5a35"]; // dark -> light
 const WATER = ["#141b24", "#1d2733", "#2a3a4b", "#56708a"]; // deep, mid, shallow rim, glint
 // Palette indices: mortar, then the stone, moss and water ramps.
@@ -129,7 +129,7 @@ const PUDDLES = [
   { x: 7.4, y: 2.5, r: 0.85 },
   { x: 6.6, y: 8.1, r: 0.55 },
 ];
-const MOSS_PATCHES = 0.66; // noise level above which moss can grow; higher is sparser
+const MOSS_PATCHES = 0.7; // noise level above which moss can grow; higher is sparser
 
 function hash(a, b, c = 0) {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0;
@@ -155,9 +155,24 @@ function seed(i, j) {
   };
 }
 
+// Floor cobbles: small rounded setts in rows along the floor, each a little
+// different in size and position. Returns the same shape as cobble() so the
+// moss, puddles and shading treat them alike.
+const SETTS_PER_TILE = 2.5;
+function sett(x, y) {
+  const n = SETTS_PER_TILE;
+  const i = Math.floor(x * n), j = Math.floor(y * n);
+  const jx = (hash(i, j, 61) - 0.5) * 0.12, jy = (hash(i, j, 62) - 0.5) * 0.12;
+  const size = 0.9 + hash(i, j, 63) * 0.12;
+  const dx = Math.abs(2 * (x * n - i - 0.5 - jx)) / size;
+  const dy = Math.abs(2 * (y * n - j - 0.5 - jy)) / size;
+  const r = Math.sqrt(Math.sqrt(dx ** 4 + dy ** 4)); // rounded square: 0 in the middle, 1 at the edge
+  return { edge: (1 - r) * 0.6, near: { i, j, s: { x: (i + 0.5 + jx) / n, y: (j + 0.5 + jy) / n } } };
+}
+
 // Palette index for a floor point: water, then moss, then bare stone.
 function floorColour(x, y, px, py) {
-  const c = cobble(x, y);
+  const c = sett(x, y);
   const mortar = c.edge < 0.045;
 
   // Wetness: above 0 inside a puddle; a little below 0 near one.
@@ -180,7 +195,7 @@ function floorColour(x, y, px, py) {
 
   // Moss: only inside a few patches, in the joints and around stone rims.
   const m = noise(x * 1.4, y * 1.4, 11);
-  if (m > MOSS_PATCHES && (mortar || c.edge < 0.1)) {
+  if (m > MOSS_PATCHES && (mortar || c.edge < 0.06)) {
     const lush = (m - MOSS_PATCHES) / (1 - MOSS_PATCHES); // 0 at a patch's edge, 1 in its middle
     if (hash(px, py, 12) < 0.25 + lush * 0.6) return P_MOSS + (mortar ? 0 : hash(px, py, 13) < 0.5 ? 1 : 2);
   }
@@ -244,7 +259,7 @@ const TORCHES = [
   { wall: "right", u: 2.2, z: 1.65 },
   { wall: "right", u: 8.2, z: 1.5 },
 ];
-const TORCH_REACH = 3.4; // tiles the light reaches
+const TORCH_REACH = 5; // tiles the light reaches
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
 const bayer = (px, py) => BAYER[(py & 3) * 4 + (px & 3)];
 
@@ -382,7 +397,7 @@ function shadeHit(box, face, x, y, z, px, py) {
 function floorPixel(x, y, px, py) {
   const gap = (room.w - x) - biteDepth(y);
   if (gap >= 0 && gap < 0.4 && y > BAND.y0 && y < BAND.y1) {
-    const c = cobble(x, y);
+    const c = sett(x, y);
     if (hash(c.near.i, c.near.j, 47) < 0.6 * (1 - gap / 0.4)) return hash(px, py, 48) < 0.2 ? P_STONE : 0;
   }
   const colour = floorColour(x, y, px, py);
@@ -396,7 +411,7 @@ const NORMALS = { top: [0, 0, 1], east: [1, 0, 0], south: [0, 1, 0] };
 function torchWorld(t) {
   // Where the torch meets the wall, and where its flame (the light) is.
   const wall = t.wall === "left" ? [0, t.u, t.z] : [t.u, 0, t.z];
-  const out = t.wall === "left" ? [0.22, 0, 0.42] : [0, 0.22, 0.42];
+  const out = t.wall === "left" ? [0.2, 0, 0.6] : [0, 0.2, 0.6];
   return { wall, flame: wall.map((v, i) => v + out[i]) };
 }
 
@@ -457,9 +472,9 @@ function paintScene() {
         if (d >= TORCH_REACH) continue;
         const facing = (n[0] * lx + n[1] * ly + n[2] * lz) / d;
         if (facing <= 0) continue;
-        const level = Math.pow(1 - d / TORCH_REACH, 1.6) * (0.35 + 0.65 * facing);
-        // A few hard-edged bands, dithered between, so the light stays pixel art.
-        const band = Math.floor(level * 5 + bayer(px, py)) / 5;
+        const level = Math.pow(1 - d / TORCH_REACH, 1.5) * (0.35 + 0.65 * facing);
+        // Fine hard-edged bands, so the light stays flat-shaded pixel art.
+        const band = Math.floor(level * 10) / 10;
         if (band <= 0) continue;
         t.light[py * CW + px] = band;
         t.box = [Math.min(t.box[0], px), Math.min(t.box[1], py), Math.max(t.box[2], px), Math.max(t.box[3], py)];
@@ -482,7 +497,7 @@ function paintScene() {
         const v = t.light[(y + y0) * CW + x + x0];
         if (!v) continue;
         const o = (y * lw + x) * 4;
-        [li.data[o], li.data[o + 1], li.data[o + 2], li.data[o + 3]] = [255, 150, 70, Math.round(v * 0.5 * 255)];
+        [li.data[o], li.data[o + 1], li.data[o + 2], li.data[o + 3]] = [255, 138, 52, Math.round(Math.min(1, v * 0.85) * 255)];
       }
     }
     lg.putImageData(li, 0, 0);
@@ -496,23 +511,27 @@ function paintScene() {
 // the right); torches on the right wall use it mirrored. The plate's middle
 // (column 0, row 8) sits on the wall; the flame stands in the cup (column 8).
 const BRACKET = [
-  ".....cccccc.",
-  ".....ckkkkc.",
-  "......cWwc..",
-  ".......Ww...",
-  ".......Ww...",
-  "pp....iWwi..",
-  "pPi...iWwi..",
-  "pPii..iWwi..",
-  "pP.iii.Ww...",
-  "pP.....Ww...",
-  "pp.....Ww...",
-  ".......Ww...",
-  "........w...",
+  "...cccccccc...",
+  "...ckkkkkkc...",
+  "...cPiiiiPc...",
+  "....cPiiPc....",
+  "....ciiiic....",
+  ".....cPPc.....",
+  "......WW......",
+  "......Ww......",
+  "......Ww......",
+  "pp...iWwi.....",
+  "pPi..iWwi.....",
+  "pPii.iWwi.....",
+  "pP.iiiWw......",
+  "pP....Ww......",
+  "pp....Ww......",
+  "......Ww......",
+  ".......w......",
 ];
-const BRACKET_ANCHOR = 8, CUP_X = 8;
+const BRACKET_ANCHOR = 11, CUP_X = 6;
 const BRACKET_COLOURS = { p: "#1c1b1f", P: "#2f2d33", i: "#2f2d33", k: "#1c1b1f", c: "#4a4650", w: "#3b2716", W: "#5a3b20" };
-const FLAME_W = 9, FLAME_H = 14, FLAME_FRAMES = 8;
+const FLAME_W = 13, FLAME_H = 26, FLAME_FRAMES = 8;
 const FLAME_COLOURS = ["#7a1e10", "#c2401a", "#ec7a1c", "#f7c23a", "#fff1a8"]; // outer to core
 
 function spriteCanvas(rows, colours) {
@@ -546,7 +565,7 @@ function flameFrames() {
       const up = (FLAME_H - 1 - y) / (FLAME_H - 1); // 0 at the base, 1 at the tip
       const sway = Math.sin(up * 2.5 + (f / FLAME_FRAMES) * Math.PI * 2) * 0.9 * up;
       // Teardrop: rounded at the base, widest a third of the way up, to a point.
-      const halfW = 4.4 * Math.sqrt(Math.max(0, Math.sin(Math.PI * Math.min(1, 0.16 + up * 0.92)))) + 0.3;
+      const halfW = 6.2 * Math.sqrt(Math.max(0, Math.sin(Math.PI * Math.min(1, 0.16 + up * 0.92)))) + 0.3;
       let row = "";
       for (let x = 0; x < FLAME_W; x++) {
         const across = Math.abs(x - (FLAME_W - 1) / 2 - sway) / halfW;
@@ -561,8 +580,30 @@ function flameFrames() {
   return frames;
 }
 
+// A soft warm glow around each flame, in a few dithered rings.
+const HALO_R = 28;
+function haloSprite() {
+  const size = HALO_R * 2 + 1;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const img = g.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x - HALO_R, (y - HALO_R) * 0.85) / HALO_R;
+      const band = Math.floor(Math.pow(Math.max(0, 1 - d), 1.4) * 4 + bayer(x, y)) / 4;
+      if (band <= 0) continue;
+      const o = (y * size + x) * 4;
+      [img.data[o], img.data[o + 1], img.data[o + 2], img.data[o + 3]] = [255, 150, 60, Math.round(band * 0.45 * 255)];
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
 const bracketSprite = spriteCanvas(BRACKET, BRACKET_COLOURS);
 const flames = flameFrames();
+const halo = haloSprite();
 const scene = paintScene();
 
 function drawScene(time) {
@@ -589,7 +630,13 @@ function drawScene(time) {
     ctx.scale(mirror * scale, scale);
     ctx.drawImage(bracketSprite, 0, -BRACKET_ANCHOR);
     const frame = flames[Math.floor(time / 90 + i * 3) % FLAME_FRAMES];
-    ctx.drawImage(frame, CUP_X + 0.5 - FLAME_W / 2, 1 - BRACKET_ANCHOR - FLAME_H);
+    const flameTop = 1 - BRACKET_ANCHOR - FLAME_H;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = flicker(time, i);
+    ctx.drawImage(halo, CUP_X + 0.5 - HALO_R - 0.5, flameTop + FLAME_H * 0.55 - HALO_R - 0.5);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(frame, CUP_X + 0.5 - FLAME_W / 2, flameTop);
     ctx.restore();
   });
 }
@@ -604,7 +651,7 @@ function flicker(time, i) {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 17;
+const ASSET_VERSION = 18;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
