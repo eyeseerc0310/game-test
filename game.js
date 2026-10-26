@@ -8,15 +8,16 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 // ---------- Rooms ----------
-// Each room is a painted image. Everything about a room is measured in its
-// image's pixels, and its floor has an isometric grid: tile (0, 0) is the
+// A room is either coded pixels (pixels: a palette and rows, drawn on the
+// canvas) or an animated image shown behind the see-through canvas.
+// Everything about a room is measured in its own pixels ("room px"), and its
+// floor has an isometric grid: tile (0, 0) is the
 // back corner where the two back walls meet the floor, x runs down-right
 // along the right-hand wall, y down-left along the left-hand wall. alongX
 // and alongY are one tile's step in image px along each wall, measured from
 // where the walls meet the floor (painted rooms aren't always exactly 2:1,
 // or even symmetric).
-const SPRITE_ZOOM = 1.3; // image px per skull art px
-const PROP_CLEARANCE = 14; // extra image px kept clear around round props
+const PROP_CLEARANCE = 11; // extra skull pixels kept clear around round props
 
 // floor: the walkable cobbles traced from the image, kept a little in from
 // the walls and short of broken edges. props: footprints the skull can't pass
@@ -27,34 +28,35 @@ const PROP_CLEARANCE = 14; // extra image px kept clear around round props
 // base); an animated flame and flickering glow are drawn over it.
 const ROOMS = {
   tower: {
-    image: "tower",
-    size: { w: 1254, h: 1254 },
-    alongX: [56, 18],
-    alongY: [-56, 19.6],
-    backCorner: { x: 628, y: 392 },
+    pixels: TOWER_PIXELS,
+    alongX: [10.1, 3.26],
+    alongY: [-10.1, 3.55],
+    backCorner: { x: 113.2, y: 71.1 },
+    skullScale: 0.235, // room px per skull pixel: the skull's pixels are finer than the room's
     floor: [
-      [628, 418], [1150, 585], [1180, 626], [1000, 692], [850, 712], [800, 790], [720, 852],
-      [560, 790], [470, 700], [330, 640], [222, 590], [205, 566],
+      [113.2, 75.8], [207.4, 106.1], [212.8, 113.5], [180.3, 125.5], [153.2, 129.1], [144.2, 143.3],
+      [129.8, 154.5], [100.9, 143.3], [84.7, 126.9], [59.4, 116.1], [39.9, 107.0], [36.9, 102.6],
     ],
     props: [
-      { name: "barrel by the left wall", ellipse: [220, 505, 36, 18] },
-      { name: "table", polygon: [[262, 455], [385, 402], [415, 430], [292, 485]] },
-      { name: "pot by the table", ellipse: [418, 438, 18, 10] },
-      { name: "barrels by the back wall", ellipse: [525, 390, 42, 18] },
-      { name: "plank by the back wall", ellipse: [470, 398, 20, 10] },
-      { name: "chest", polygon: [[625, 372], [680, 348], [737, 368], [682, 396]] },
-      { name: "planks by the right wall", ellipse: [840, 422, 28, 14] },
-      { name: "barrel under the torch", ellipse: [1065, 545, 32, 15] },
-      { name: "jar", ellipse: [1112, 585, 18, 10] },
-      { name: "barrel in the corner", ellipse: [1170, 612, 32, 15] },
+      { name: "barrel by the left wall", ellipse: [39.6, 91.6, 6.5, 3.3] },
+      { name: "table", polygon: [[47.1, 82.5], [69.3, 72.9], [74.7, 78.0], [52.6, 88.0]] },
+      { name: "pot by the table", ellipse: [75.3, 79.4, 3.2, 1.8] },
+      { name: "barrels by the back wall", ellipse: [94.6, 70.7, 7.6, 3.3] },
+      { name: "plank by the back wall", ellipse: [84.7, 72.2, 3.6, 1.8] },
+      { name: "chest", polygon: [[112.6, 67.5], [122.6, 63.1], [132.9, 66.7], [122.9, 71.8]] },
+      { name: "planks by the right wall", ellipse: [151.4, 76.5, 5.1, 2.5] },
+      { name: "barrel under the torch", ellipse: [192.0, 98.8, 5.8, 2.7] },
+      { name: "jar", ellipse: [200.5, 106.1, 3.2, 1.8] },
+      { name: "barrel in the corner", ellipse: [211.0, 111.0, 5.8, 2.7] },
     ],
     // The archway in the right-hand wall (the wall at y = 0).
     doors: [{ wall: "right", from: 5.5, to: 6.4, leadsTo: "cellar", arrive: { x: 1.1, y: 6.5, facing: "front-right" } }],
-    torches: [{ x: 398, y: 318 }, { x: 733, y: 236 }, { x: 1121, y: 466 }],
+    torches: [{ x: 71.7, y: 57.7 }, { x: 132.1, y: 42.8 }, { x: 202.1, y: 84.5 }],
   },
   cellar: {
     image: "room2",
     size: { w: 1509, h: 1042 },
+    skullScale: 1.3, // room px per skull pixel
     alongX: [56, 28],
     alongY: [-56, 28],
     backCorner: { x: 765, y: 265 },
@@ -81,22 +83,54 @@ const DOOR_DEPTH = 0.6; // tiles of doorway floor behind the wall line
 const FLOOR_INSET = 0.6; // tiles the traced floor stops short of the walls
 
 let room = ROOMS.tower;
-const roomImages = Object.fromEntries(Object.values(ROOMS).map((r) => [r.image, document.getElementById(r.image)]));
+const roomImages = Object.fromEntries(Object.values(ROOMS).filter((r) => r.image).map((r) => [r.image, document.getElementById(r.image)]));
 
-let scale = 1; // screen px per image px
+let scale = 1; // screen px per room px
 let originX = 0; // screen position of the image's top-left corner
 let originY = 0;
+
+// A coded-pixel room's pixels, drawn once onto a canvas of its own.
+function roomCanvas(pixels) {
+  const c = document.createElement("canvas");
+  c.width = pixels.width;
+  c.height = pixels.height;
+  const g = c.getContext("2d");
+  const img = g.createImageData(c.width, c.height);
+  const rgb = pixels.palette.map((h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16)));
+  pixels.rows.forEach((row, y) => {
+    for (let x = 0; x < pixels.width; x++) {
+      const o = (y * pixels.width + x) * 4;
+      [img.data[o], img.data[o + 1], img.data[o + 2]] = rgb[parseInt(row.substr(x * 2, 2), 16)];
+      img.data[o + 3] = 255;
+    }
+  });
+  g.putImageData(img, 0, 0);
+  return c;
+}
 
 function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+  const size = room.pixels ? { w: room.pixels.width, h: room.pixels.height } : room.size;
   // Show the whole room, as large as fits, centred.
-  scale = Math.min(canvas.width / room.size.w, canvas.height / room.size.h);
-  originX = Math.round((canvas.width - room.size.w * scale) / 2);
-  originY = Math.round((canvas.height - room.size.h * scale) / 2);
+  scale = Math.min(canvas.width / size.w, canvas.height / size.h);
+  if (room.pixels) {
+    // Coded pixels: a whole-number zoom so every pixel is the same size. The
+    // top and bottom of the picture are dark, so it may run off the screen a
+    // little there to get the next size up.
+    scale = Math.min(canvas.width / size.w, canvas.height / (size.h * 0.86));
+    if (scale >= 1) scale = Math.floor(scale);
+    room.canvas ||= roomCanvas(room.pixels);
+  }
+  originX = Math.round((canvas.width - size.w * scale) / 2);
+  originY = Math.round((canvas.height - size.h * scale) / 2);
   for (const [name, img] of Object.entries(roomImages)) {
+    if (name !== room.image) {
+      img.style.display = "none";
+      continue;
+    }
     Object.assign(img.style, {
-      display: name === room.image ? "block" : "none",
+      display: "block",
       left: originX + "px",
       top: originY + "px",
       width: room.size.w * scale + "px",
@@ -135,7 +169,7 @@ function insidePolygon([px, py], points) {
 // A doorway's floor, in tiles: across its opening, from inside the room
 // (where the traced floor stops) to DOOR_DEPTH behind the wall line.
 function doorArea(door) {
-  const across = [door.from, door.to], into = [-DOOR_DEPTH, FLOOR_INSET + 0.05];
+  const across = [door.from, door.to], into = [-DOOR_DEPTH, FLOOR_INSET + 0.4]; // overlaps the traced floor
   return door.wall === "left" ? { x: into, y: across } : { x: across, y: into };
 }
 
@@ -159,7 +193,8 @@ function walkable(x, y) {
     // Kept a little further off than the footprint, so the skull's sprite
     // doesn't sit over the prop.
     const [cx, cy, rx, ry] = ellipse;
-    return ((p.x - cx) / (rx + PROP_CLEARANCE)) ** 2 + ((p.y - cy) / (ry + PROP_CLEARANCE / 2)) ** 2 < 1;
+    const clear = PROP_CLEARANCE * room.skullScale; // in room px
+    return ((p.x - cx) / (rx + clear)) ** 2 + ((p.y - cy) / (ry + clear / 2)) ** 2 < 1;
   });
 }
 
@@ -200,7 +235,7 @@ function fadeAmount() {
 // The rooms' torches are painted still, so a looping pixel-art flame is
 // drawn over each one, in the image's own pixel size, with a warm glow that
 // flickers with it.
-const TORCH_PX = 5.5; // image px per pixel of the flame, matching the painting
+const TORCH_PX = 1; // room px per pixel of the flame
 const FLAME_W = 7, FLAME_H = 15, FLAME_FRAMES = 8;
 const FLAME_COLOURS = ["#6e1a0e", "#c2401a", "#ec7a1c", "#f7c23a", "#fff1a8"]; // outer to core
 
@@ -265,7 +300,7 @@ function glowSprite(r) {
 }
 
 const flames = flameFrames();
-const GLOW_R = 140; // image px
+const GLOW_R = 25; // room px
 const glow = glowSprite(GLOW_R);
 
 // 0.7..1: a quick unsteady flicker, different for each torch.
@@ -358,7 +393,7 @@ function update(dt) {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 22;
+const ASSET_VERSION = 23;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -399,7 +434,7 @@ function drawPlayer(time) {
   const bob = (Math.sin(time / 450) + 1) / 2; // 0..1, slow up and down
 
   // Shadow on the floor, smaller while the skull is higher up.
-  const zoom = SPRITE_ZOOM * scale; // screen px per skull art px
+  const zoom = room.skullScale * scale; // screen px per skull art px
   const r = 23 * zoom * (1 - bob * 0.2);
   ctx.fillStyle = "rgba(0,0,0,0.55)";
   ctx.beginPath();
@@ -477,6 +512,10 @@ function drawBarriers() {
 function draw(time) {
   // The room image shows through the cleared canvas.
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (room.canvas) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(room.canvas, originX, originY, room.canvas.width * scale, room.canvas.height * scale);
+  }
   drawTorches(time);
   if (DEBUG) drawBarriers();
   drawPlayer(time);
