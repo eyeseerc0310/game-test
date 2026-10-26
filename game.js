@@ -50,33 +50,36 @@ const ROOMS = {
       { name: "barrel in the corner", ellipse: [211.0, 111.0, 5.8, 2.7] },
     ],
     // The archway in the right-hand wall (the wall at y = 0).
-    doors: [{ wall: "right", from: 5.5, to: 6.4, leadsTo: "cellar", arrive: { x: 1.1, y: 6.5, facing: "front-right" } }],
+    doors: [{ wall: "right", from: 5.5, to: 6.4, leadsTo: "cellar", arrive: { x: 1.1, y: 6.0, facing: "front-right" } }],
     torches: [{ x: 71.7, y: 57.7 }, { x: 132.1, y: 42.8 }, { x: 202.1, y: 84.5 }],
   },
   cellar: {
-    image: "room2",
-    size: { w: 1509, h: 1042 },
-    skullScale: 1.3, // room px per skull pixel
-    alongX: [56, 28],
-    alongY: [-56, 28],
-    backCorner: { x: 765, y: 265 },
+    pixels: CELLAR_PIXELS,
+    alongX: [13.75, 5.62],
+    alongY: [-13.75, 5.62],
+    backCorner: { x: 149.0, y: 98.8 },
+    skullScale: 0.32, // room px per skull pixel: the same size against the picture as in the tower
+    glowR: 34,
     floor: [
-      [765, 299], [1240, 536], [1180, 570], [1060, 626], [962, 640], [905, 700], [782, 768],
-      [700, 760], [470, 640], [420, 610], [300, 560], [262, 548],
+      [149.0, 105.1], [279.1, 158.5], [284.0, 165.5], [264.4, 183.9], [244.7, 195.8], [215.3, 199.5],
+      [209.1, 213.2], [158.8, 235.1], [115.9, 215.2], [102.4, 195.8], [55.7, 170.9], [39.8, 158.5],
+      [38.5, 148.6],
     ],
     props: [
-      { name: "crates", polygon: [[700, 300], [762, 270], [838, 306], [778, 338]] },
-      { name: "plank", ellipse: [852, 318, 26, 14] },
-      { name: "jar by the crates", ellipse: [706, 298, 22, 12] },
-      { name: "jar by the left wall", ellipse: [520, 386, 24, 13] },
-      { name: "barrel by the door", ellipse: [270, 496, 36, 20] },
-      { name: "small jar", ellipse: [322, 472, 20, 11] },
-      { name: "fallen stones", ellipse: [926, 352, 36, 18] },
-      { name: "stairs", polygon: [[960, 395], [1060, 345], [1215, 430], [1120, 485]] },
-      { name: "barrel by the stairs", ellipse: [1210, 488, 34, 19] },
+      { name: "barrel by the door", ellipse: [45.4, 138.6, 7.4, 3.5] },
+      { name: "jar by the door", ellipse: [57.4, 141.1, 4.4, 2.2] },
+      { name: "planks by the door", ellipse: [98.7, 116.2, 4.4, 2.0] },
+      { name: "fallen stones", ellipse: [117.1, 103.8, 7.4, 3.0] },
+      { name: "barrel", ellipse: [137.2, 97.6, 7.9, 3.2] },
+      { name: "crate", polygon: [[152.7, 95.1], [163.7, 90.1], [175.5, 95.1], [164.2, 100.1]] },
+      { name: "stones by the stairs", ellipse: [195.6, 111.3, 8.3, 3.5] },
+      { name: "stairs", polygon: [[205.4, 118.7], [225.1, 108.8], [266.8, 128.7], [247.2, 142.4]] },
+      { name: "barrel by the stairs", ellipse: [264.4, 148.6, 7.4, 3.2] },
+      { name: "jar by the stairs", ellipse: [272.9, 154.8, 4.4, 2.2] },
     ],
     // The archway in the left-hand wall (the wall at x = 0).
-    doors: [{ wall: "left", from: 5.9, to: 7.1, leadsTo: "tower", arrive: { x: 5.95, y: 1.3, facing: "front-left" } }],
+    doors: [{ wall: "left", from: 5.55, to: 6.45, leadsTo: "tower", arrive: { x: 5.95, y: 1.3, facing: "front-left" } }],
+    torches: [{ x: 43.4, y: 115.3 }, { x: 98.7, y: 83.9 }, { x: 175.5, y: 62.8 }, { x: 226.6, y: 75.7 }, { x: 269.3, y: 101.8 }],
   },
 };
 const DOOR_DEPTH = 0.6; // tiles of doorway floor behind the wall line
@@ -300,7 +303,7 @@ function glowSprite(r) {
 }
 
 const flames = flameFrames();
-const GLOW_R = 25; // room px
+const GLOW_R = 25; // room px, unless a room sets its own glowR
 const glow = glowSprite(GLOW_R);
 
 // 0.7..1: a quick unsteady flicker, different for each torch.
@@ -315,7 +318,8 @@ function drawTorches(time) {
     const x = originX + t.x * scale, y = originY + t.y * scale;
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = flicker(time, i);
-    ctx.drawImage(glow, x - GLOW_R * scale, y - GLOW_R * 0.4 * scale - GLOW_R * scale, 2 * GLOW_R * scale, 2 * GLOW_R * scale);
+    const r = (room.glowR || GLOW_R) * scale;
+    ctx.drawImage(glow, x - r, y - r * 0.4 - r, 2 * r, 2 * r);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     const px = TORCH_PX * scale;
@@ -393,7 +397,7 @@ function update(dt) {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 23;
+const ASSET_VERSION = 24;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
