@@ -7,13 +7,22 @@
 # 3. Fit all pixels to one palette that keeps rare colours (flames, water).
 # 4. Write a JS file: the palette and one string per row, two hex digits
 #    (a palette index) per pixel.
-# Usage: python3 tools/image_to_pixels.py <image.png> <out.js> <JS_NAME> [colours]
+# Usage: python3 tools/image_to_pixels.py <image.png> <out.js> <JS_NAME> [colours] [--grid PX PY]
+# --grid forces the pixel size (image px per pixel across and down) instead of
+# finding it, so rooms painted at different pixel sizes can share one: each
+# pixel then takes the median colour of the area it covers.
 import sys
 import numpy as np
 from PIL import Image
 
-src, out_js, name = sys.argv[1:4]
-n_colours = int(sys.argv[4]) if len(sys.argv) > 4 else 256
+args = sys.argv[1:]
+forced = None
+if '--grid' in args:
+    k = args.index('--grid')
+    forced = (float(args[k + 1]), float(args[k + 2]))
+    del args[k:k + 3]
+src, out_js, name = args[:3]
+n_colours = int(args[3]) if len(args) > 3 else 256
 a = np.asarray(Image.open(src).convert('RGB')).astype(float)
 H, W, _ = a.shape
 
@@ -30,8 +39,11 @@ def fit_grid(change):
     return best[1], best[2]
 
 
-px, ox = fit_grid(np.abs(np.diff(a, axis=1)).sum(2).sum(0))
-py, oy = fit_grid(np.abs(np.diff(a, axis=0)).sum(2).sum(1))
+if forced:
+    (px, py), ox, oy = forced, 0.0, 0.0
+else:
+    px, ox = fit_grid(np.abs(np.diff(a, axis=1)).sum(2).sum(0))
+    py, oy = fit_grid(np.abs(np.diff(a, axis=0)).sum(2).sum(1))
 n, m = int((W - ox) // px), int((H - oy) // py)
 
 # Flatness of every 3x3 patch: low inside a pixel, high across its edges.
@@ -44,6 +56,11 @@ for j in range(m):
         cx = ox + (i + 0.5) * px
         y0, y1 = int(max(1, cy - px * 0.3)), int(min(H - 2, cy + px * 0.3)) + 1
         x0, x1 = int(max(1, cx - px * 0.3)), int(min(W - 2, cx + px * 0.3)) + 1
+        if forced:  # not the painting's own grid: take the area this pixel covers
+            ya, yb = int(round(oy + j * py)), int(round(oy + (j + 1) * py))
+            xa, xb = int(round(ox + i * px)), int(round(ox + (i + 1) * px))
+            pixels[j, i] = np.median(a[ya:yb, xa:xb].reshape(-1, 3), axis=0)
+            continue
         k = np.unravel_index(var3[y0:y1, x0:x1].argmin(), (y1 - y0, x1 - x0))
         yy, xx = y0 + k[0], x0 + k[1]
         pixels[j, i] = np.median(a[yy - 1:yy + 2, xx - 1:xx + 2].reshape(-1, 3), axis=0)
