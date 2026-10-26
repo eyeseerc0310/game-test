@@ -1,20 +1,42 @@
-// Dungeon crawler — step 1: a red square that moves with WASD.
+// Dungeon crawler — isometric room with a red block that moves with WASD.
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-const player = { x: 0, y: 0, size: 32, speed: 240 }; // speed in pixels per second
+// The world is measured in tiles; the camera turns tiles into screen pixels.
+const room = { w: 10, h: 10 };
+const player = { x: 4.7, y: 4.7, size: 0.6, height: 0.6, speed: 4 }; // speed in tiles per second
+
+const TILE_W = 64; // width of one floor diamond on screen, before scaling
+const TILE_H = 32; // height of one floor diamond (2:1 isometric)
+
+let scale = 1;
+let originX = 0;
+let originY = 0;
 
 function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+
+  // Fit the whole room on screen with some margin, never bigger than 1.5x.
+  const roomPxW = (room.w + room.h) * TILE_W / 2;
+  const roomPxH = (room.w + room.h) * TILE_H / 2 + TILE_H * 2;
+  scale = Math.min(1.5, (canvas.width * 0.9) / roomPxW, (canvas.height * 0.85) / roomPxH);
+
+  // Put the middle of the room in the middle of the screen.
+  originX = canvas.width / 2 - ((room.w - room.h) * TILE_W / 4) * scale;
+  originY = canvas.height / 2 - ((room.w + room.h) * TILE_H / 4) * scale;
 }
 window.addEventListener("resize", resize);
 resize();
 
-// Start in the middle of the screen.
-player.x = (canvas.width - player.size) / 2;
-player.y = (canvas.height - player.size) / 2;
+// World (tile) coordinates -> screen pixels. z lifts a point straight up.
+function toScreen(x, y, z = 0) {
+  return {
+    x: originX + (x - y) * (TILE_W / 2) * scale,
+    y: originY + ((x + y) * (TILE_H / 2) - z * TILE_H) * scale,
+  };
+}
 
 // Track which keys are held down.
 const keys = new Set();
@@ -23,31 +45,70 @@ window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 window.addEventListener("blur", () => keys.clear());
 
 function update(dt) {
+  // WASD follows the screen: W is up the screen, which is diagonal in the world.
   let dx = 0, dy = 0;
-  if (keys.has("w")) dy -= 1;
-  if (keys.has("s")) dy += 1;
-  if (keys.has("a")) dx -= 1;
-  if (keys.has("d")) dx += 1;
+  if (keys.has("w")) { dx -= 1; dy -= 1; }
+  if (keys.has("s")) { dx += 1; dy += 1; }
+  if (keys.has("a")) { dx -= 1; dy += 1; }
+  if (keys.has("d")) { dx += 1; dy -= 1; }
 
-  // Keep diagonal movement the same speed as straight movement.
-  if (dx && dy) {
-    dx *= Math.SQRT1_2;
-    dy *= Math.SQRT1_2;
+  // Same speed in every direction.
+  const len = Math.hypot(dx, dy);
+  if (len) {
+    player.x += (dx / len) * player.speed * dt;
+    player.y += (dy / len) * player.speed * dt;
   }
 
-  player.x += dx * player.speed * dt;
-  player.y += dy * player.speed * dt;
+  // Stay inside the room.
+  player.x = Math.max(0, Math.min(room.w - player.size, player.x));
+  player.y = Math.max(0, Math.min(room.h - player.size, player.y));
+}
 
-  // Stay on screen.
-  player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
-  player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
+function polygon(points, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (const p of points.slice(1)) ctx.lineTo(p.x, p.y);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+  }
+}
+
+function drawFloor() {
+  ctx.lineWidth = 1;
+  for (let y = 0; y < room.h; y++) {
+    for (let x = 0; x < room.w; x++) {
+      const shade = (x + y) % 2 ? "#2a2a33" : "#26262e";
+      polygon(
+        [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)],
+        shade,
+        "#1b1b22"
+      );
+    }
+  }
+}
+
+// The player is a red block: a lit top and two shaded sides facing the camera.
+function drawPlayer() {
+  const { x, y, size: s, height: h } = player;
+  ctx.lineWidth = 1;
+  // Shadow on the floor.
+  polygon([toScreen(x, y), toScreen(x + s, y), toScreen(x + s, y + s), toScreen(x, y + s)], "rgba(0,0,0,0.35)");
+  // Left face (along y = y + s) and right face (along x = x + s).
+  polygon([toScreen(x, y + s), toScreen(x + s, y + s), toScreen(x + s, y + s, h), toScreen(x, y + s, h)], "#a81f1f");
+  polygon([toScreen(x + s, y), toScreen(x + s, y + s), toScreen(x + s, y + s, h), toScreen(x + s, y, h)], "#c62828");
+  // Top.
+  polygon([toScreen(x, y, h), toScreen(x + s, y, h), toScreen(x + s, y + s, h), toScreen(x, y + s, h)], "#ee3b3b");
 }
 
 function draw() {
   ctx.fillStyle = "#111";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#e33";
-  ctx.fillRect(Math.round(player.x), Math.round(player.y), player.size, player.size);
+  drawFloor();
+  drawPlayer();
 }
 
 let last = performance.now();
