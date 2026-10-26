@@ -4,12 +4,16 @@
 # 2. Pick one shared palette for all of them and snap every pixel to it.
 # Eye-glow pixels are matched the same way but against the eye colours.
 # Usage: python3 tools/match_colors.py <bone colours> <reference.png> <other.png>...
+#        python3 tools/match_colors.py --snap <reference.png> <new.png>...
+# --snap adds new art to an already-matched set: it shifts the new sprites to
+# the reference's colours and snaps them to the colours the reference uses.
 # Files are rewritten in place; run it on fresh cuts from tools/cut_sprite.py.
 import sys
 from PIL import Image
 import numpy as np
 
-n_colors = int(sys.argv[1])
+snap_only = sys.argv[1] == '--snap'
+n_colors = None if snap_only else int(sys.argv[1])
 paths = sys.argv[2:]
 imgs = [np.asarray(Image.open(p).convert('RGBA')).astype(float) for p in paths]
 
@@ -63,9 +67,14 @@ def snap(px, centers):
     return centers[((px[:, None, :] - centers[None]) ** 2).sum(2).argmin(1)]
 
 
-allpx = np.concatenate(matched)
-alleye = is_eye(allpx)
-pal = {False: palette(allpx[~alleye], n_colors), True: palette(allpx[alleye], 4)}
+if snap_only:
+    used = np.unique(ref, axis=0)
+    pal = {False: used[~is_eye(used)], True: used[is_eye(used)]}
+    paths, imgs, matched = paths[1:], imgs[1:], matched[1:]   # leave the reference as is
+else:
+    allpx = np.concatenate(matched)
+    alleye = is_eye(allpx)
+    pal = {False: palette(allpx[~alleye], n_colors), True: palette(allpx[alleye], 4)}
 
 for path, im, px in zip(paths, imgs, matched):
     eye = is_eye(px)
@@ -78,4 +87,4 @@ for path, im, px in zip(paths, imgs, matched):
     out[mask, :3] = out_px
     out[mask, 3] = 255
     Image.fromarray(out, 'RGBA').save(path)
-print(len(pal[False]), 'bone/outline colours +', len(pal[True]), 'eye colours, shared')
+print(len(pal[False]), 'bone/outline colours +', len(pal[True]), 'eye colours, shared by', len(paths), 'sprite(s)')

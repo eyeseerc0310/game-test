@@ -118,7 +118,7 @@ function drawFloor() {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 11;
+const ASSET_VERSION = 12;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -140,6 +140,12 @@ const SPRITES = {
   "back-right": skullBackThreeQuarter,
 };
 const ART_W = 64; // reference width, so every sprite gets the same pixel size
+
+// Facing front, bony hands reach out from under the jaw on both sides. The hand
+// is cut at the front skull's pixel size, so they read as one drawing.
+const hand = loadImage("assets/hand.png");
+const HAND_OVERLAP = 14; // art px the hand tucks in under the skull's side
+const HAND_DROP = 8;     // art px the hand reaches below the skull
 
 function drawPlayer(time) {
   const cx = player.x + player.size / 2;
@@ -165,8 +171,22 @@ function drawPlayer(time) {
   ctx.imageSmoothingEnabled = false;
   ctx.save();
   ctx.translate(Math.round(foot.x), Math.round(foot.y - lift));
+  const left = -Math.round(w / 2);
+  if (player.facing === "front" && hand.complete && hand.naturalWidth) {
+    const hw = Math.round(hand.naturalWidth * zoom);
+    const hh = Math.round(hand.naturalHeight * zoom);
+    const hx = left - Math.round((hand.naturalWidth - HAND_OVERLAP) * zoom);
+    const hy = Math.round(HAND_DROP * zoom) - hh;
+    ctx.drawImage(hand, hx, hy, hw, hh);
+    // The other hand is the same drawing mirrored around the skull's middle.
+    ctx.save();
+    ctx.translate(2 * left + w, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(hand, hx, hy, hw, hh);
+    ctx.restore();
+  }
   if (player.facing.endsWith("right")) ctx.scale(-1, 1);
-  ctx.drawImage(skull, -Math.round(w / 2), -h, w, h);
+  ctx.drawImage(skull, left, -h, w, h);
   ctx.restore();
 }
 
