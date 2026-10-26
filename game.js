@@ -9,12 +9,12 @@ const ctx = canvas.getContext("2d");
 
 // ---------- Rooms ----------
 // Each room is a painted image. Everything about a room is measured in its
-// image's pixels, and its floor has the same isometric grid: one tile is
-// 112 x 56 image px (2:1), with tile (0, 0) at the back corner where the two
-// back walls meet the floor. x runs down-right along the right-hand wall, y
-// down-left along the left-hand wall.
-const TILE_W = 112;
-const TILE_H = 56;
+// image's pixels, and its floor has an isometric grid: tile (0, 0) is the
+// back corner where the two back walls meet the floor, x runs down-right
+// along the right-hand wall, y down-left along the left-hand wall. alongX
+// and alongY are one tile's step in image px along each wall, measured from
+// where the walls meet the floor (painted rooms aren't always exactly 2:1,
+// or even symmetric).
 const SPRITE_ZOOM = 1.3; // image px per skull art px
 const PROP_CLEARANCE = 14; // extra image px kept clear around round props
 
@@ -23,32 +23,40 @@ const PROP_CLEARANCE = 14; // extra image px kept clear around round props
 // through, as ellipses (centre and radii) or polygons. doors: a doorway's
 // opening in floor tiles (a stretch of the wall it's in, from the room side
 // into the wall); stepping past the wall line leads to another room.
+// torches: where a torch's flame stands in the image (the middle of its
+// base); an animated flame and flickering glow are drawn over it.
 const ROOMS = {
   tower: {
-    image: "room",
-    size: { w: 1509, h: 1042 },
-    backCorner: { x: 755, y: 262 },
+    image: "tower",
+    size: { w: 1254, h: 1254 },
+    alongX: [56, 18],
+    alongY: [-56, 19.6],
+    backCorner: { x: 628, y: 392 },
     floor: [
-      [755, 296], [1308, 566], [1298, 588], [1250, 594], [1100, 606], [962, 630], [888, 684],
-      [866, 812], [806, 842], [266, 578], [244, 546],
+      [628, 418], [1150, 585], [1180, 626], [1000, 692], [850, 712], [800, 790], [720, 852],
+      [560, 790], [470, 700], [330, 640], [222, 590], [205, 566],
     ],
     props: [
-      { name: "barrel by the left wall", ellipse: [286, 502, 46, 26] },
-      { name: "stool", ellipse: [346, 472, 30, 17] },
-      { name: "table", polygon: [[340, 438], [492, 362], [522, 392], [372, 466]] },
-      { name: "bucket", ellipse: [520, 380, 24, 14] },
-      { name: "barrel on its side", ellipse: [615, 330, 44, 24] },
-      { name: "chest", polygon: [[736, 318], [790, 292], [850, 322], [796, 352]] },
-      { name: "planks and crates", ellipse: [940, 345, 44, 24] },
-      { name: "jar", ellipse: [1268, 500, 30, 17] },
-      { name: "barrel by the right wall", ellipse: [1328, 515, 40, 22] },
+      { name: "barrel by the left wall", ellipse: [220, 505, 36, 18] },
+      { name: "table", polygon: [[262, 455], [385, 402], [415, 430], [292, 485]] },
+      { name: "pot by the table", ellipse: [418, 438, 18, 10] },
+      { name: "barrels by the back wall", ellipse: [525, 390, 42, 18] },
+      { name: "plank by the back wall", ellipse: [470, 398, 20, 10] },
+      { name: "chest", polygon: [[625, 372], [680, 348], [737, 368], [682, 396]] },
+      { name: "planks by the right wall", ellipse: [840, 422, 28, 14] },
+      { name: "barrel under the torch", ellipse: [1065, 545, 32, 15] },
+      { name: "jar", ellipse: [1112, 585, 18, 10] },
+      { name: "barrel in the corner", ellipse: [1170, 612, 32, 15] },
     ],
     // The archway in the right-hand wall (the wall at y = 0).
-    doors: [{ wall: "right", from: 6.15, to: 7.15, leadsTo: "cellar", arrive: { x: 1.1, y: 6.5, facing: "front-right" } }],
+    doors: [{ wall: "right", from: 5.5, to: 6.4, leadsTo: "cellar", arrive: { x: 1.1, y: 6.5, facing: "front-right" } }],
+    torches: [{ x: 398, y: 318 }, { x: 733, y: 236 }, { x: 1121, y: 466 }],
   },
   cellar: {
     image: "room2",
     size: { w: 1509, h: 1042 },
+    alongX: [56, 28],
+    alongY: [-56, 28],
     backCorner: { x: 765, y: 265 },
     floor: [
       [765, 299], [1240, 536], [1180, 570], [1060, 626], [962, 640], [905, 700], [782, 768],
@@ -66,7 +74,7 @@ const ROOMS = {
       { name: "barrel by the stairs", ellipse: [1210, 488, 34, 19] },
     ],
     // The archway in the left-hand wall (the wall at x = 0).
-    doors: [{ wall: "left", from: 5.9, to: 7.1, leadsTo: "tower", arrive: { x: 6.65, y: 1.1, facing: "front-left" } }],
+    doors: [{ wall: "left", from: 5.9, to: 7.1, leadsTo: "tower", arrive: { x: 5.95, y: 1.3, facing: "front-left" } }],
   },
 };
 const DOOR_DEPTH = 0.6; // tiles of doorway floor behind the wall line
@@ -104,8 +112,8 @@ resize();
 // Floor (tile) coordinates -> room image px. z lifts a point straight up.
 function toImage(x, y, z = 0) {
   return {
-    x: room.backCorner.x + (x - y) * (TILE_W / 2),
-    y: room.backCorner.y + ((x + y) * (TILE_H / 2) - z * TILE_H),
+    x: room.backCorner.x + x * room.alongX[0] + y * room.alongY[0],
+    y: room.backCorner.y + x * room.alongX[1] + y * room.alongY[1] - z * 2 * room.alongX[1],
   };
 }
 
@@ -188,10 +196,103 @@ function fadeAmount() {
   return k * k * (3 - 2 * k); // ease in and out
 }
 
+// ---------- Torches ----------
+// The rooms' torches are painted still, so a looping pixel-art flame is
+// drawn over each one, in the image's own pixel size, with a warm glow that
+// flickers with it.
+const TORCH_PX = 5.5; // image px per pixel of the flame, matching the painting
+const FLAME_W = 7, FLAME_H = 15, FLAME_FRAMES = 8;
+const FLAME_COLOURS = ["#6e1a0e", "#c2401a", "#ec7a1c", "#f7c23a", "#fff1a8"]; // outer to core
+
+function hash(a, b, c = 0) {
+  let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296; // 0..1
+}
+
+function pixelCanvas(w, h, colourAt) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d");
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const colour = colourAt(x, y);
+      if (!colour) continue;
+      g.fillStyle = colour;
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  return c;
+}
+
+// A teardrop eaten into by noise that rises through it; the noise repeats
+// every 4 units, so the last frame runs back into the first.
+function flameFrames() {
+  const loopNoise = (x, y) => {
+    const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+    const h = (a, b) => hash(a, ((b % 4) + 4) % 4, 50);
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const top = h(i, j) + (h(i + 1, j) - h(i, j)) * sx;
+    const bottom = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * sx;
+    return top + (bottom - top) * sy;
+  };
+  return Array.from({ length: FLAME_FRAMES }, (_, f) => pixelCanvas(FLAME_W, FLAME_H, (x, y) => {
+    const up = (FLAME_H - 1 - y) / (FLAME_H - 1); // 0 at the base, 1 at the tip
+    const turn = (f / FLAME_FRAMES) * Math.PI * 2;
+    const sway = Math.sin(up * 2.5 + turn) * 0.6 * up;
+    const halfW = 3.4 * Math.sqrt(Math.max(0, Math.sin(Math.PI * Math.min(1, 0.16 + up * 0.92)))) + 0.3;
+    const across = Math.abs(x - (FLAME_W - 1) / 2 - sway) / halfW;
+    const n = loopNoise(x * 0.8, up * 2 + (f / FLAME_FRAMES) * 4);
+    const heat = 1 - across - up * 0.45 + (n - 0.5) * (0.5 + up * 0.6); // licks more near the tip
+    const band = heat > 0.72 ? 4 : heat > 0.52 ? 3 : heat > 0.32 ? 2 : heat > 0.16 ? 1 : heat > 0.04 ? 0 : -1;
+    return FLAME_COLOURS[band];
+  }));
+}
+
+// A warm glow in a few soft rings, added over the painting round each flame.
+function glowSprite(r) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 2 * r;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, "rgba(255, 150, 60, 0.35)");
+  grad.addColorStop(0.4, "rgba(255, 120, 40, 0.12)");
+  grad.addColorStop(1, "rgba(255, 100, 30, 0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 2 * r, 2 * r);
+  return c;
+}
+
+const flames = flameFrames();
+const GLOW_R = 140; // image px
+const glow = glowSprite(GLOW_R);
+
+// 0.7..1: a quick unsteady flicker, different for each torch.
+function flicker(time, i) {
+  const t = time / 1000;
+  return 0.85 + 0.09 * Math.sin(t * 9.1 + i * 2.1) + 0.06 * Math.sin(t * 23.7 + i * 4.3);
+}
+
+function drawTorches(time) {
+  ctx.imageSmoothingEnabled = false;
+  (room.torches || []).forEach((t, i) => {
+    const x = originX + t.x * scale, y = originY + t.y * scale;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = flicker(time, i);
+    ctx.drawImage(glow, x - GLOW_R * scale, y - GLOW_R * 0.4 * scale - GLOW_R * scale, 2 * GLOW_R * scale, 2 * GLOW_R * scale);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    const px = TORCH_PX * scale;
+    const frame = flames[Math.floor(time / 90 + i * 3) % FLAME_FRAMES];
+    ctx.drawImage(frame, Math.round(x - (FLAME_W / 2) * px), Math.round(y - FLAME_H * px), Math.round(FLAME_W * px), Math.round(FLAME_H * px));
+  });
+}
+
 // ---------- Player ----------
 // x, y: the skull's centre on the floor, in tiles; speed in tiles per second;
 // facing is one of the keys of SPRITES below.
-const player = { x: 5.46, y: 5.18, speed: 3.6, facing: "front" };
+const player = { x: 5, y: 5, speed: 3.6, facing: "front" };
 
 // Track which keys are held down.
 const keys = new Set();
@@ -257,7 +358,7 @@ function update(dt) {
 // Side art faces left; the "right" facings mirror it. Each view is cut so the
 // skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 21;
+const ASSET_VERSION = 22;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
@@ -289,8 +390,8 @@ const HAND_DROP = 6;     // art px the hand reaches below the skull
 const HAND_SWAY = 1.5;   // art px of sideways drift
 const hands = [
   // side: -1 left (as drawn), 1 right (mirrored); periods in ms; follow: how fast it catches up
-  { side: -1, bobPeriod: 520, bobPhase: 1.3, swayPeriod: 830, swayPhase: 0.4, follow: 7, x: 5.46, y: 5.18 },
-  { side: 1, bobPeriod: 390, bobPhase: 4.1, swayPeriod: 670, swayPhase: 2.6, follow: 5, x: 5.46, y: 5.18 },
+  { side: -1, bobPeriod: 520, bobPhase: 1.3, swayPeriod: 830, swayPhase: 0.4, follow: 7, x: 5, y: 5 },
+  { side: 1, bobPeriod: 390, bobPhase: 4.1, swayPeriod: 670, swayPhase: 2.6, follow: 5, x: 5, y: 5 },
 ];
 
 function drawPlayer(time) {
@@ -376,6 +477,7 @@ function drawBarriers() {
 function draw(time) {
   // The room image shows through the cleared canvas.
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawTorches(time);
   if (DEBUG) drawBarriers();
   drawPlayer(time);
   const fade = fadeAmount();
