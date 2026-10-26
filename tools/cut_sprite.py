@@ -1,12 +1,15 @@
-# Cut a sprite out of an image with a fake grey/white checkerboard background
-# and shrink it to its real pixel size (64 px wide).
+# Cut a sprite out of an image and shrink it to its real pixel size.
+# The background is either real transparency or a fake grey/white checkerboard.
 # Usage: python3 tools/cut_sprite.py <source.png> <out.png> <preview.png>
 import sys
 from PIL import Image
 import numpy as np
 from collections import deque
 src, out, preview = sys.argv[1:4]
-a = np.asarray(Image.open(src).convert('RGB')).astype(int)
+ART_PX = 13  # source pixels per art pixel in the drawings so far
+im = Image.open(src)
+alpha = np.asarray(im.convert('RGBA'))[..., 3]
+a = np.asarray(im.convert('RGB')).astype(int)
 H, W, _ = a.shape
 grey = ((a.max(2) - a.min(2)) < 14) & (a.min(2) > 140)   # checkerboard pixels
 bg = np.zeros((H, W), bool)
@@ -22,11 +25,13 @@ while q:
     for ny, nx in ((y+1,x),(y-1,x),(y,x+1),(y,x-1)):
         if 0 <= ny < H and 0 <= nx < W and grey[ny, nx] and not bg[ny, nx]:
             bg[ny, nx] = True; q.append((ny, nx))
+if (alpha < 128).mean() > 0.05:  # real transparency: use it instead
+    bg = alpha < 128
 ys, xs = np.where(~bg)
 y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
 rgb = a[y0:y1, x0:x1]; fg = ~bg[y0:y1, x0:x1]
-# Downscale to roughly the art's real pixel size (~13 screen px per art pixel).
-tw = 64; th = round(tw * (y1 - y0) / (x1 - x0))
+# Downscale so each art pixel becomes one real pixel.
+tw = round((x1 - x0) / ART_PX); th = round((y1 - y0) / ART_PX)
 res = np.zeros((th, tw, 4), np.uint8)
 for j in range(th):
     for i in range(tw):
@@ -34,7 +39,7 @@ for j in range(th):
         xa, xb = i * (x1-x0) // tw, (i+1) * (x1-x0) // tw
         m = fg[ya:yb, xa:xb]
         if m.mean() < 0.5: continue
-        # middle of the block avoids blending neighbouring art pixels
+        # median keeps colours crisp instead of blending neighbouring art pixels
         c = rgb[ya:yb, xa:xb][m]
         res[j, i, :3] = np.median(c, axis=0); res[j, i, 3] = 255
 img = Image.fromarray(res, 'RGBA'); img.save(out)

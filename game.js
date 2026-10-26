@@ -5,7 +5,8 @@ const ctx = canvas.getContext("2d");
 
 // The world is measured in tiles; the camera turns tiles into screen pixels.
 const room = { w: 10, h: 10 };
-const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4 }; // speed in tiles per second
+// speed in tiles per second; facing is -1 (left) or 1 (right) on screen
+const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4, facing: -1 };
 
 const TILE_W = 64; // width of one floor diamond on screen, before scaling
 const TILE_H = 32; // height of one floor diamond (2:1 isometric)
@@ -52,6 +53,10 @@ function update(dt) {
   if (keys.has("a")) { dx -= 1; dy += 1; }
   if (keys.has("d")) { dx += 1; dy -= 1; }
 
+  // Face the way we last moved sideways; W and S alone keep the old facing.
+  const sideways = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
+  if (sideways) player.facing = sideways;
+
   // Same speed in every direction.
   const len = Math.hypot(dx, dy);
   if (len) {
@@ -92,8 +97,10 @@ function drawFloor() {
 }
 
 // The player is a floating skull sprite, bobbing gently over its shadow.
+// The art faces left; it is mirrored when the player last moved right.
 const skull = new Image();
-skull.src = "assets/skull.png";
+skull.src = "assets/skull-side.png";
+const ART_W = 64; // reference width, so every sprite gets the same pixel size
 
 function drawPlayer(time) {
   const cx = player.x + player.size / 2;
@@ -110,13 +117,17 @@ function drawPlayer(time) {
 
   if (!skull.complete || !skull.naturalWidth) return;
   // Whole-number zoom when the art fits, so every art pixel is the same size.
-  let zoom = (TILE_W * scale * 0.75) / skull.naturalWidth;
+  let zoom = (TILE_W * scale * 0.75) / ART_W;
   if (zoom >= 1) zoom = Math.floor(zoom);
   const w = Math.round(skull.naturalWidth * zoom);
   const h = Math.round(skull.naturalHeight * zoom);
   const lift = (TILE_H * 0.35 + bob * TILE_H * 0.2) * scale;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(skull, Math.round(foot.x - w / 2), Math.round(foot.y - lift - h), w, h);
+  ctx.save();
+  ctx.translate(Math.round(foot.x), Math.round(foot.y - lift));
+  if (player.facing > 0) ctx.scale(-1, 1);
+  ctx.drawImage(skull, -Math.round(w / 2), -h, w, h);
+  ctx.restore();
 }
 
 function draw(time) {
