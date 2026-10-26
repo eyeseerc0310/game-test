@@ -5,7 +5,7 @@ const ctx = canvas.getContext("2d");
 
 // The world is measured in tiles; the camera turns tiles into screen pixels.
 const room = { w: 10, h: 10 };
-// speed in tiles per second; facing is "left", "right" or "front" on screen
+// speed in tiles per second; facing is one of the keys of SPRITES below
 const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4, facing: "front" };
 
 const TILE_W = 64; // width of one floor diamond on screen, before scaling
@@ -45,6 +45,9 @@ window.addEventListener("keydown", (e) => keys.add(e.key.toLowerCase()));
 window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 window.addEventListener("blur", () => keys.clear());
 
+const TURN_DELAY = 0.08; // seconds
+let facingHeld = 0;
+
 function update(dt) {
   // WASD follows the screen: W is up the screen, which is diagonal in the world.
   let dx = 0, dy = 0;
@@ -53,11 +56,23 @@ function update(dt) {
   if (keys.has("a")) { dx -= 1; dy += 1; }
   if (keys.has("d")) { dx += 1; dy -= 1; }
 
-  // A and D turn to the side (they win on diagonals), S faces the camera,
-  // W alone keeps the old facing.
+  // A / D show the profile, S the front, S+A / S+D the three-quarter view.
+  // W has no back view yet, so W alone keeps the old facing.
   const sideways = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
-  if (sideways) player.facing = sideways > 0 ? "right" : "left";
-  else if (keys.has("s") && !keys.has("w")) player.facing = "front";
+  const down = keys.has("s") && !keys.has("w");
+  const side = sideways > 0 ? "right" : "left";
+  let want = player.facing;
+  if (sideways && down) want = "front-" + side;
+  else if (sideways) want = side;
+  else if (down) want = "front";
+
+  // Only turn once a new facing has lasted a moment, so letting go of S+A
+  // one key slightly before the other doesn't flick to the A-only pose.
+  if (want === player.facing) facingHeld = 0;
+  else if ((facingHeld += dt) >= TURN_DELAY) {
+    player.facing = want;
+    facingHeld = 0;
+  }
 
   // Same speed in every direction.
   const len = Math.hypot(dx, dy);
@@ -99,14 +114,22 @@ function drawFloor() {
 }
 
 // The player is a floating skull sprite, bobbing gently over its shadow.
-// The side art faces left; it is mirrored to face right.
+// Side art faces left; the "right" facings mirror it. All are 70 art px tall.
 function loadImage(src) {
   const img = new Image();
   img.src = src;
   return img;
 }
 const skullFront = loadImage("assets/skull.png");
-const skullSide = loadImage("assets/skull-side.png");
+const skullThreeQuarter = loadImage("assets/skull-side.png");
+const skullProfile = loadImage("assets/skull-profile.png");
+const SPRITES = {
+  "front": skullFront,
+  "left": skullProfile,
+  "right": skullProfile,
+  "front-left": skullThreeQuarter,
+  "front-right": skullThreeQuarter,
+};
 const ART_W = 64; // reference width, so every sprite gets the same pixel size
 
 function drawPlayer(time) {
@@ -122,7 +145,7 @@ function drawPlayer(time) {
   ctx.ellipse(foot.x, foot.y, r, r / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const skull = player.facing === "front" ? skullFront : skullSide;
+  const skull = SPRITES[player.facing];
   if (!skull.complete || !skull.naturalWidth) return;
   // Whole-number zoom when the art fits, so every art pixel is the same size.
   let zoom = (TILE_W * scale * 0.75) / ART_W;
@@ -133,7 +156,7 @@ function drawPlayer(time) {
   ctx.imageSmoothingEnabled = false;
   ctx.save();
   ctx.translate(Math.round(foot.x), Math.round(foot.y - lift));
-  if (player.facing === "right") ctx.scale(-1, 1);
+  if (player.facing.endsWith("right")) ctx.scale(-1, 1);
   ctx.drawImage(skull, -Math.round(w / 2), -h, w, h);
   ctx.restore();
 }
