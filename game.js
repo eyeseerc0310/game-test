@@ -5,7 +5,7 @@ const ctx = canvas.getContext("2d");
 
 // The world is measured in tiles; the camera turns tiles into screen pixels.
 const room = { w: 10, h: 10 };
-// speed in tiles per second; facing is one of the keys of FRAMES below
+// speed in tiles per second; facing is one of the keys of SPRITES below
 const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4, facing: "front" };
 
 const TILE_W = 64; // width of one floor diamond on screen, before scaling
@@ -56,8 +56,8 @@ function update(dt) {
   if (keys.has("a")) { dx -= 1; dy += 1; }
   if (keys.has("d")) { dx += 1; dy -= 1; }
 
-  // Face the way we move: A / D left and right, S front, W back, and the
-  // diagonals the three-quarter views.
+  // A / D show the profile, S the front, W the back, and the diagonals the
+  // three-quarter views (front for S+A / S+D, back for W+A / W+D).
   const sideways = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
   const vertical = (keys.has("s") ? 1 : 0) - (keys.has("w") ? 1 : 0);
   const side = sideways > 0 ? "right" : "left";
@@ -115,29 +115,31 @@ function drawFloor() {
 }
 
 // The player is a floating skull sprite, bobbing gently over its shadow.
-// The art is one sprite sheet: the skull turning through eight directions,
-// drawn in Pixelorama (tools/pxo_to_sheet.py). Every frame shares one 60x60
-// canvas, so the skull keeps its size and place as it turns.
+// Side art faces left; the "right" facings mirror it. Each view is cut so the
+// skull covers about the same area, so it keeps its size as it turns.
 // Bump with index.html's ?v= so browsers fetch changed art instead of a cached copy.
-const ASSET_VERSION = 10;
+const ASSET_VERSION = 11;
 function loadImage(src) {
   const img = new Image();
   img.src = src + "?v=" + ASSET_VERSION;
   return img;
 }
-const skullSheet = loadImage("assets/skull-turn.png");
-const FRAME = 60; // each frame is 60x60 art pixels
-const FRAMES = {   // facing -> frame in the sheet, in the order it was drawn
-  "front": 0,
-  "front-right": 1,
-  "right": 2,
-  "back-right": 3,
-  "back": 4,
-  "back-left": 5,
-  "left": 6,
-  "front-left": 7,
+const skullFront = loadImage("assets/skull.png");
+const skullThreeQuarter = loadImage("assets/skull-side.png");
+const skullProfile = loadImage("assets/skull-profile.png");
+const skullBackThreeQuarter = loadImage("assets/skull-back-side.png");
+const skullBack = loadImage("assets/skull-back.png");
+const SPRITES = {
+  "front": skullFront,
+  "left": skullProfile,
+  "right": skullProfile,
+  "front-left": skullThreeQuarter,
+  "front-right": skullThreeQuarter,
+  "back": skullBack,
+  "back-left": skullBackThreeQuarter,
+  "back-right": skullBackThreeQuarter,
 };
-const ART_W = 48; // art width that fills 3/4 of a tile; sets the zoom
+const ART_W = 64; // reference width, so every sprite gets the same pixel size
 
 function drawPlayer(time) {
   const cx = player.x + player.size / 2;
@@ -152,18 +154,20 @@ function drawPlayer(time) {
   ctx.ellipse(foot.x, foot.y, r, r / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  if (!skullSheet.complete || !skullSheet.naturalWidth) return;
+  const skull = SPRITES[player.facing];
+  if (!skull.complete || !skull.naturalWidth) return;
   // Whole-number zoom when the art fits, so every art pixel is the same size.
   let zoom = (TILE_W * scale * 0.75) / ART_W;
   if (zoom >= 1) zoom = Math.floor(zoom);
-  const size = Math.round(FRAME * zoom);
+  const w = Math.round(skull.naturalWidth * zoom);
+  const h = Math.round(skull.naturalHeight * zoom);
   const lift = (TILE_H * 0.35 + bob * TILE_H * 0.2) * scale;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(
-    skullSheet,
-    FRAMES[player.facing] * FRAME, 0, FRAME, FRAME,
-    Math.round(foot.x - size / 2), Math.round(foot.y - lift - size), size, size
-  );
+  ctx.save();
+  ctx.translate(Math.round(foot.x), Math.round(foot.y - lift));
+  if (player.facing.endsWith("right")) ctx.scale(-1, 1);
+  ctx.drawImage(skull, -Math.round(w / 2), -h, w, h);
+  ctx.restore();
 }
 
 function draw(time) {
