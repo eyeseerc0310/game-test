@@ -1,11 +1,11 @@
-// Dungeon crawler — isometric room with a red block that moves with WASD.
+// Dungeon crawler — isometric room with a floating skull that moves with WASD.
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 // The world is measured in tiles; the camera turns tiles into screen pixels.
 const room = { w: 10, h: 10 };
-const player = { x: 4.7, y: 4.7, size: 0.6, height: 0.6, speed: 4 }; // speed in tiles per second
+const player = { x: 4.7, y: 4.7, size: 0.6, speed: 4 }; // speed in tiles per second
 
 const TILE_W = 64; // width of one floor diamond on screen, before scaling
 const TILE_H = 32; // height of one floor diamond (2:1 isometric)
@@ -91,24 +91,39 @@ function drawFloor() {
   }
 }
 
-// The player is a red block: a lit top and two shaded sides facing the camera.
-function drawPlayer() {
-  const { x, y, size: s, height: h } = player;
-  ctx.lineWidth = 1;
-  // Shadow on the floor.
-  polygon([toScreen(x, y), toScreen(x + s, y), toScreen(x + s, y + s), toScreen(x, y + s)], "rgba(0,0,0,0.35)");
-  // Left face (along y = y + s) and right face (along x = x + s).
-  polygon([toScreen(x, y + s), toScreen(x + s, y + s), toScreen(x + s, y + s, h), toScreen(x, y + s, h)], "#a81f1f");
-  polygon([toScreen(x + s, y), toScreen(x + s, y + s), toScreen(x + s, y + s, h), toScreen(x + s, y, h)], "#c62828");
-  // Top.
-  polygon([toScreen(x, y, h), toScreen(x + s, y, h), toScreen(x + s, y + s, h), toScreen(x, y + s, h)], "#ee3b3b");
+// The player is a floating skull sprite, bobbing gently over its shadow.
+const skull = new Image();
+skull.src = "assets/skull.png";
+
+function drawPlayer(time) {
+  const cx = player.x + player.size / 2;
+  const cy = player.y + player.size / 2;
+  const foot = toScreen(cx, cy);
+  const bob = (Math.sin(time / 450) + 1) / 2; // 0..1, slow up and down
+
+  // Shadow on the floor, smaller while the skull is higher up.
+  const r = TILE_W * scale * 0.24 * (1 - bob * 0.2);
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.beginPath();
+  ctx.ellipse(foot.x, foot.y, r, r / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (!skull.complete || !skull.naturalWidth) return;
+  // Whole-number zoom when the art fits, so every art pixel is the same size.
+  let zoom = (TILE_W * scale * 0.75) / skull.naturalWidth;
+  if (zoom >= 1) zoom = Math.floor(zoom);
+  const w = Math.round(skull.naturalWidth * zoom);
+  const h = Math.round(skull.naturalHeight * zoom);
+  const lift = (TILE_H * 0.35 + bob * TILE_H * 0.2) * scale;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(skull, Math.round(foot.x - w / 2), Math.round(foot.y - lift - h), w, h);
 }
 
-function draw() {
+function draw(time) {
   ctx.fillStyle = "#111";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   drawFloor();
-  drawPlayer();
+  drawPlayer(time);
 }
 
 let last = performance.now();
@@ -116,7 +131,7 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05); // cap so a background tab doesn't jump
   last = now;
   update(dt);
-  draw();
+  draw(now);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
