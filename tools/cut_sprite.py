@@ -1,6 +1,7 @@
 # Cut a sprite out of an image with a fake grey/white checkerboard background
 # and shrink it to its real pixel size (64 px wide).
 # Usage: python3 tools/cut_sprite.py <source.png> <out.png> <preview.png>
+import sys
 from PIL import Image
 import numpy as np
 from collections import deque
